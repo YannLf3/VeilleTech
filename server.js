@@ -47,7 +47,10 @@ const {
   FEED_LIMIT = '5',
   CORS_ORIGIN,
   TRUST_PROXY,
+  CRON_SECRET,
 } = process.env;
+// Vercel définit VERCEL=1 : fonction serverless (pas de listen ni de node-cron, disque en lecture seule sauf /tmp).
+const IS_VERCEL = Boolean(process.env.VERCEL);
 
 if (!JWT_SECRET || JWT_SECRET.length < 32) exit('JWT_SECRET manquant ou trop court (≥ 32 caractères).');
 if (!ADMIN_PASSWORD_HASH?.startsWith('$2')) exit('ADMIN_PASSWORD_HASH manquant (hash bcrypt, voir .env.example).');
@@ -61,7 +64,10 @@ function exit(msg) {
 /* ---------------------------------- Données --------------------------------- */
 
 // Dossier data/ : monté en volume Docker (./data:/app/data) pour survivre aux redémarrages.
-const DATA_FILE = path.resolve(process.env.DATA_PATH || path.join(__dirname, 'data', 'data.json'));
+// Sur Vercel, seul /tmp est inscriptible, et il est ÉPHÉMÈRE (propre à chaque instance) : voir README.
+const DATA_FILE = path.resolve(
+  process.env.DATA_PATH || (IS_VERCEL ? '/tmp/techveille/data.json' : path.join(__dirname, 'data', 'data.json'))
+);
 const SEED_FILE = path.join(__dirname, 'data.seed.json');
 let items = [];
 let writeQueue = Promise.resolve();
@@ -201,8 +207,14 @@ const LOCK_MS = 15 * 60_000;
 
 /* ---------------------------------- App ----------------------------------- */
 
+const ready = load();
+
 const app = express();
 app.disable('x-powered-by');
+app.use(async (req, res, next) => {
+  await ready; // première requête d'une instance : attend le chargement des données
+  next();
+});
 if (TRUST_PROXY) app.set('trust proxy', 1);
 if (CORS_ORIGIN) app.use('/api', cors({ origin: CORS_ORIGIN.split(',') }));
 app.use((req, res, next) => {
@@ -285,6 +297,15 @@ app.post('/api/import', requireAuth, async (req, res) => {
 
 app.post('/api/force-fetch', requireAuth, async (req, res) => res.json(await runVeille()));
 
+/** Veille planifiée par Vercel Cron (GET + en-tête « Authorization: Bearer <CRON_SECRET> »). */
+app.get('/api/cron', async (req, res) => {
+  const expected = Buffer.from(`Bearer ${CRON_SECRET ?? ''}`);
+  const received = Buffer.from(req.get('authorization') ?? '');
+  const valid = Boolean(CRON_SECRET) && received.length === expected.length && crypto.timingSafeEqual(received, expected);
+  if (!valid) return res.status(401).json({ error: 'Non autorisé.' });
+  res.json(await runVeille());
+});
+
 /** Récapitulatif Markdown des fiches datées des 7 derniers jours, groupées par catégorie. */
 app.get('/api/admin/digest', requireAuth, (req, res) => {
   const from = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
@@ -316,12 +337,17 @@ app.use((err, req, res, _next) => {
 
 /* --------------------------------- Démarrage -------------------------------- */
 
-cron.schedule(
-  CRON_SCHEDULE,
-  () => runVeille().then((r) => console.log('[veille] cron :', r)).catch((e) => console.error('[veille] cron :', e)),
-  { timezone: CRON_TZ }
-);
+// Local / Docker : serveur HTTP + planification interne. Sur Vercel, la plateforme appelle `app`
+// et la planification passe par vercel.json → GET /api/cron.
+if (!IS_VERCEL) {
+  cron.schedule(
+    CRON_SCHEDULE,
+    () => runVeille().then((r) => console.log('[veille] cron :', r)).catch((e) => console.error('[veille] cron :', e)),
+    { timezone: CRON_TZ }
+  );
+  ready.then(() =>
+    app.listen(PORT, () => console.log(`TechVeille Hub → http://localhost:${PORT} (veille : "${CRON_SCHEDULE}" ${CRON_TZ})`))
+  );
+}
 
-load().then(() =>
-  app.listen(PORT, () => console.log(`TechVeille Hub → http://localhost:${PORT} (veille : "${CRON_SCHEDULE}" ${CRON_TZ})`))
-);
+module.exports = app;

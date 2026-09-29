@@ -41,8 +41,9 @@ L'objectif n'était donc pas de livrer un produit commercial, mais d'**évaluer 
 11. [Le front-end en détail](#11-le-front-end-en-détail)
 12. [PWA et fonctionnement hors-ligne](#12-pwa-et-fonctionnement-hors-ligne)
 13. [Déploiement Docker](#13-déploiement-docker)
-14. [Scripts de maintenance](#14-scripts-de-maintenance)
-15. [Limites connues et pistes d'amélioration](#15-limites-connues-et-pistes-damélioration)
+14. [Déploiement Vercel (serverless)](#14-déploiement-vercel-serverless)
+15. [Scripts de maintenance](#15-scripts-de-maintenance)
+16. [Limites connues et pistes d'amélioration](#16-limites-connues-et-pistes-damélioration)
 
 ---
 
@@ -182,6 +183,7 @@ Toutes les variables sont lues par `server.js` (via `dotenv`). Le fichier `.env`
 | `DATA_PATH` | non | `data/data.json` | Emplacement du fichier de données. |
 | `CORS_ORIGIN` | non | — | Origines autorisées si le front est servi depuis un autre domaine. |
 | `TRUST_PROXY` | non | — | À définir (`1`) derrière un reverse proxy, pour que la limitation des tentatives de connexion voie la vraie IP. |
+| `CRON_SECRET` | Vercel | — | Secret du Cron Job Vercel, vérifié par `GET /api/cron` (voir §14). |
 
 ---
 
@@ -237,6 +239,7 @@ VeilleTech/
 ├── .env.example              # Modèle de configuration (à copier en .env)
 ├── Dockerfile                # Image de production
 ├── docker-compose.yml        # Orchestration Docker (port 3000, volume ./data)
+├── vercel.json               # Déploiement Vercel : Cron Job hebdomadaire → /api/cron
 ├── .dockerignore             # Fichiers exclus de l'image Docker
 ├── .gitignore                # Fichiers exclus de Git (.env, data/, node_modules…)
 ├── CLAUDE.md                 # Mémo technique destiné à Claude Code
@@ -274,7 +277,7 @@ Organisé en sections :
 6. **Routes de l'API** (voir [section 8](#8-api-rest)), dont le **digest** Markdown.
 7. **Fichiers statiques** : `express.static('public')`.
 8. **Gestionnaire d'erreurs** : renvoie un JSON propre, sans fuite de détails internes pour les erreurs 500.
-9. **Démarrage** : planification cron puis écoute HTTP.
+9. **Démarrage** : hors Vercel, planification `node-cron` puis écoute HTTP ; dans tous les cas, `module.exports = app` (utilisé par Vercel). Chaque requête attend la fin du chargement initial des données (`ready`), indispensable en serverless où il n'y a pas de phase de démarrage.
 
 ### 6.2 `veille.js` — le pipeline de veille
 
@@ -389,6 +392,7 @@ Toutes les réponses sont en JSON. Les routes marquées **JWT** exigent l'en-tê
 | `POST` | `/api/import` | JWT | Import en masse (`{ items: [...] }` ou tableau). |
 | `POST` | `/api/force-fetch` | JWT | Lance la veille immédiatement → `{ added, rejected, untranslated, failedFeeds }`. |
 | `GET` | `/api/admin/digest` | JWT | Digest Markdown des 7 derniers jours → `{ markdown, count, from, to }`. |
+| `GET` | `/api/cron` | `CRON_SECRET` | Veille planifiée par Vercel Cron (en-tête `Authorization: Bearer <CRON_SECRET>`). |
 
 Exemple :
 
@@ -419,7 +423,7 @@ curl -X POST http://localhost:3000/api/force-fetch -H "Authorization: Bearer $TO
 
 ### Déclenchement
 
-- **Automatique** : `node-cron`, par défaut chaque **lundi à 8 h** (heure de Paris).
+- **Automatique** : `node-cron`, par défaut chaque **lundi à 8 h** (heure de Paris) en local et sous Docker ; sur Vercel, Cron Job de `vercel.json` → `GET /api/cron` (voir §14).
 - **Manuel** : bouton « Lancer la veille web » (admin) → `POST /api/force-fetch`, avec indicateur de chargement.
 
 ### Sources par défaut (`FEED_URLS`)
@@ -542,7 +546,48 @@ Image finale : environ 200 Mo. Le `.dockerignore` exclut `.env`, `data/`, `node_
 
 ---
 
-## 14. Scripts de maintenance
+## 14. Déploiement Vercel (serverless)
+
+L'application peut aussi être déployée sur [Vercel](https://vercel.com), qui détecte Express **sans configuration** :
+
+- `server.js` (à la racine) importe `express` et exporte l'application (`module.exports = app`) : toute l'API devient **une seule fonction serverless** (Node.js, *Fluid compute*).
+- Le dossier `public/` est servi directement par le **CDN** de Vercel (`express.static()` y est ignoré, mais reste utilisé en local et sous Docker).
+- Sur Vercel (variable `VERCEL` définie automatiquement), `server.js` **n'ouvre pas de port** et **ne lance pas `node-cron`** : c'est la plateforme qui appelle l'application et qui planifie la veille.
+
+### `vercel.json` et la veille planifiée
+
+```json
+{ "crons": [{ "path": "/api/cron", "schedule": "0 6 * * 1" }] }
+```
+
+- Vercel appelle `GET /api/cron` chaque **lundi à 6 h UTC**, soit **8 h à Paris en heure d'été** (7 h en hiver) : les crons Vercel sont **toujours en UTC**.
+- Sur l'offre gratuite (Hobby), l'appel peut avoir lieu **à n'importe quel moment dans l'heure** (entre 6 h 00 et 6 h 59 UTC).
+- La route est protégée : Vercel envoie `Authorization: Bearer <CRON_SECRET>` ; `server.js` compare cette valeur en temps constant et répond `401` si elle est absente ou fausse (ou si `CRON_SECRET` n'est pas configuré).
+- Aucune règle de redirection n'est nécessaire dans `vercel.json` : Vercel envoie automatiquement vers la fonction Express toute requête qui ne correspond pas à un fichier de `public/`.
+- Durée maximale d'une fonction : 300 s par défaut, suffisant pour une veille (environ 2 à 3 minutes au premier passage).
+
+### Mise en ligne
+
+1. Sur [vercel.com/new](https://vercel.com/new), importer le dépôt GitHub (ou lancer `npx vercel` dans le dossier).
+2. Dans **Settings → Environment Variables**, définir :
+   - `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` (coller le hash **sans apostrophes** : l'interface Vercel prend la valeur telle quelle) ;
+   - `CRON_SECRET` : une chaîne aléatoire d'au moins 16 caractères ;
+   - facultatif : `FEED_URLS`, `FEED_LIMIT`.
+3. Déployer. Le cron apparaît dans **Settings → Cron Jobs**, d'où il peut aussi être déclenché manuellement.
+
+### ⚠️ Limite importante : stockage non persistant
+
+Le disque des fonctions Vercel est **en lecture seule**, à l'exception de `/tmp`, qui est **éphémère** et propre à chaque instance. Sur Vercel, les fiches sont donc stockées dans `/tmp/techveille/data.json`, initialisé depuis `data.seed.json` (15 fiches) :
+
+- les fiches ajoutées, modifiées ou récupérées par la veille **disparaissent** quand l'instance est recyclée ;
+- deux instances simultanées peuvent afficher des données différentes ;
+- la limitation des tentatives de connexion est, elle aussi, propre à chaque instance.
+
+Le déploiement Vercel convient donc à une **démonstration**. Pour un usage réel, il faut un stockage externe (par exemple **Vercel Blob**, **Upstash Redis** ou **Neon Postgres**, disponibles via le Marketplace Vercel) ; le déploiement **Docker**, lui, persiste les données dans `./data`.
+
+---
+
+## 15. Scripts de maintenance
 
 | Commande | Rôle |
 |---|---|
@@ -554,12 +599,13 @@ Tous deux créent une sauvegarde `data.backup-<horodatage>.json` avant d'écrire
 
 ---
 
-## 15. Limites connues et pistes d'amélioration
+## 16. Limites connues et pistes d'amélioration
 
 - **Traduction littérale** : le moteur gratuit traduit mot à mot ; le glossaire corrige les erreurs récurrentes mais pas tous les contresens. Une vraie reformulation nécessiterait un LLM (payant).
 - **Moteur de traduction non officiel** : il peut limiter le débit ou changer ; les articles concernés sont alors simplement reportés.
 - **Tailwind via CDN** : pratique mais déconseillé en production (poids, dépendance réseau) ; passer à Tailwind CLI serait plus propre.
 - **Infobulles natives** (`title`) : invisibles au clavier et au toucher.
+- **Vercel** : stockage éphémère (`/tmp`), voir §14 — un stockage externe serait nécessaire pour un usage réel.
 - **Stockage JSON** : adapté à un usage personnel ; au-delà de quelques milliers de fiches ou avec plusieurs éditeurs, SQLite serait préférable.
 - **Un seul administrateur**, jeton conservé côté client (un cookie `httpOnly` serait plus sûr, au prix d'une protection CSRF).
 - **Catégorisation par mots-clés** : simple et prévisible, mais imparfaite sur les articles ambigus.

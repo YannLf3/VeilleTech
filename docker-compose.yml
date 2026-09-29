@@ -1,0 +1,16 @@
+# Lancement : mkdir -p data && docker compose up -d --build
+# (créer ./data soi-même avant le 1er lancement : un dossier créé par Docker appartient à root
+#  et l'utilisateur « node » du conteneur ne pourrait pas y écrire.)
+services:
+  techveille:
+    build: .
+    image: techveille-hub
+    restart: unless-stopped
+    env_file: .env # JWT_SECRET, ADMIN_*, FEED_URLS… (non copié dans l'image)
+    environment:
+      PORT: 3000
+      DATA_PATH: /app/data/data.json
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data # data.json + sauvegardes persistés hors du conteneur

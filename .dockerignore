@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+!.env.example
+data
+*.backup-*.json
+.git
+.gitignore
+.claude
+.DS_Store
+Dockerfile
+docker-compose.yml
+CLAUDE.md

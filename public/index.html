@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>TechVeille Hub</title>
+  <meta name="description" content="Veille technologique front-end : standards web, CSS, design, méthodologies et outils." />
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.json" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="TechVeille" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            mono: ['"Geist Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    :root { color-scheme: dark; }
+    body { padding-bottom: env(safe-area-inset-bottom); }
+    .no-scrollbar { scrollbar-width: none; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .bg-grid {
+      background-image:
+        linear-gradient(to right, rgb(255 255 255 / 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgb(255 255 255 / 0.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at top, black 20%, transparent 70%);
+    }
+    body:not(.is-admin) [data-admin], body.is-admin [data-guest] { display: none !important; }
+    dialog::backdrop { background: rgb(0 0 0 / 0.7); backdrop-filter: blur(4px); }
+    dialog[open] { animation: dialog-in 160ms ease-out; }
+    @keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+
+<body class="min-h-dvh bg-black font-sans text-neutral-200 antialiased selection:bg-white selection:text-black">
+  <a href="#results" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-black">Aller aux résultats</a>
+
+  <div class="bg-grid pointer-events-none fixed inset-x-0 top-0 h-[480px]" aria-hidden="true"></div>
+
+  <!-- Header -->
+  <header class="sticky top-0 z-30 border-b border-neutral-800/80 bg-black/70 backdrop-blur-xl" style="padding-top: env(safe-area-inset-top)">
+    <div class="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4">
+      <a href="./" class="flex items-center gap-2.5 font-semibold tracking-tight text-white">
+        <svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path d="M12 3 22 20H2L12 3Z" fill="currentColor"/></svg>
+        <span>TechVeille<span class="text-neutral-500">Hub</span></span>
+      </a>
+      <span data-admin class="hidden sm:inline rounded-full border border-neutral-700 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-neutral-400">Admin</span>
+      <span id="net-status" class="hidden rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">Hors-ligne</span>
+
+      <div class="ml-auto flex items-center gap-1.5">
+        <button id="btn-install" type="button" hidden
+          class="h-8 rounded-md border border-neutral-800 px-3 text-sm text-neutral-300 transition hover:border-neutral-600 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+          Installer
+        </button>
+        <div role="group" aria-label="Affichage" class="inline-flex rounded-md border border-neutral-800 p-0.5">
+          <button type="button" data-action="set-view" data-view="list" aria-pressed="true" aria-label="Vue liste" title="Vue liste" class="grid h-7 w-7 place-items-center rounded text-neutral-500 transition hover:text-white aria-pressed:bg-neutral-800 aria-pressed:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <button type="button" data-action="set-view" data-view="kanban" aria-pressed="false" aria-label="Vue Kanban" title="Vue Kanban (Radar Tech)" class="grid h-7 w-7 place-items-center rounded text-neutral-500 transition hover:text-white aria-pressed:bg-neutral-800 aria-pressed:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>
+          </button>
+        </div>
+        <button id="btn-veille" type="button" data-admin data-action="force-fetch"
+          class="inline-flex h-8 items-center gap-1.5 rounded-md border border-neutral-800 px-2.5 text-sm text-neutral-300 transition hover:border-neutral-600 hover:text-white disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>
+          <span class="sr-only sm:not-sr-only" data-label>Lancer la veille web</span>
+        </button>
+        <button type="button" data-guest data-action="open-login" aria-label="Connexion administrateur"
+          class="grid h-8 w-8 place-items-center rounded-md text-neutral-600 transition hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        </button>
+        <div class="relative">
+          <button id="btn-menu" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu" aria-label="Plus d'actions"
+            class="grid h-8 w-8 place-items-center rounded-md border border-neutral-800 text-neutral-400 transition hover:border-neutral-600 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+          </button>
+          <div id="menu" role="menu" hidden
+            class="absolute right-0 top-10 w-60 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950 p-1 shadow-2xl shadow-black">
+            <button type="button" role="menuitem" data-action="export-json" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Exporter les données (JSON)</button>
+            <button type="button" role="menuitem" data-admin data-action="import-json" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Importer un fichier JSON…</button>
+            <button type="button" role="menuitem" data-action="make-offline" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Rendre disponible hors-ligne</button>
+            <button type="button" role="menuitem" data-action="export-md" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Exporter la sélection (Markdown)</button>
+            <button type="button" role="menuitem" data-admin data-action="open-digest" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Générer le digest hebdo</button>
+            <button type="button" role="menuitem" data-admin data-action="logout" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Se déconnecter</button>
+          </div>
+        </div>
+        <button type="button" data-admin data-action="open-add"
+          class="hidden h-8 items-center gap-1.5 rounded-md bg-white px-3 text-sm font-medium text-black transition hover:bg-neutral-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:ring-offset-2 focus-visible:ring-offset-black sm:inline-flex">
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          Ajouter
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="relative mx-auto max-w-6xl px-4 pb-28 pt-8 sm:pt-12">
+    <!-- Hero -->
+    <section class="mb-8">
+      <h1 class="text-3xl font-semibold tracking-tight text-white sm:text-5xl">Veille front-end,<br class="sm:hidden" /> <span class="bg-gradient-to-r from-neutral-200 to-neutral-500 bg-clip-text text-transparent">sans le bruit.</span></h1>
+      <p class="mt-3 max-w-xl text-sm text-neutral-400 sm:text-base">Standards web, CSS, design, méthodologies et outils : les nouveautés qui comptent, avec démo de code et export Markdown.</p>
+    </section>
+
+    <!-- Filters -->
+    <section aria-label="Filtres" class="space-y-3">
+      <div class="relative">
+        <label for="search" class="sr-only">Rechercher</label>
+        <svg viewBox="0 0 24 24" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="search" type="search" autocomplete="off" placeholder="Rechercher un sujet, un tag…"
+          class="h-11 w-full rounded-lg border border-neutral-800 bg-neutral-950 pl-10 pr-16 text-[15px] text-white placeholder:text-neutral-500 transition focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/10" />
+        <kbd class="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded border border-neutral-800 px-1.5 py-0.5 font-mono text-[11px] text-neutral-500 sm:block">/</kbd>
+      </div>
+
+      <div id="category-filters" role="group" aria-label="Catégorie" class="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4"></div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <div id="status-filters" role="group" aria-label="Statut" class="no-scrollbar inline-flex max-w-full overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-950 p-0.5"></div>
+        <button id="favs-toggle" type="button" aria-pressed="false"
+          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-neutral-800 px-3 text-sm text-neutral-400 transition hover:text-white aria-pressed:border-amber-500/40 aria-pressed:bg-amber-500/10 aria-pressed:text-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+          <span aria-hidden="true">★</span> Favoris
+        </button>
+        <label for="period" class="sr-only">Période</label>
+        <select id="period" class="h-8 rounded-lg border border-neutral-800 bg-neutral-950 px-2 text-sm text-neutral-300 transition hover:border-neutral-600 focus:border-neutral-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"></select>
+        <label for="sort" class="sr-only">Tri</label>
+        <select id="sort" class="h-8 rounded-lg border border-neutral-800 bg-neutral-950 px-2 text-sm text-neutral-300 transition hover:border-neutral-600 focus:border-neutral-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+          <option value="desc">Plus récents</option>
+          <option value="asc">Plus anciens</option>
+        </select>
+        <div id="active-tag" class="contents"></div>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <div class="mb-3 mt-8 flex items-center justify-between">
+      <p id="results-count" class="text-xs font-medium uppercase tracking-wider text-neutral-500" aria-live="polite"></p>
+      <button id="btn-reset" type="button" hidden class="text-xs text-neutral-400 underline-offset-4 hover:text-white hover:underline">Réinitialiser les filtres</button>
+    </div>
+    <!-- Wrappers sans classe d'affichage : l'attribut hidden y reste effectif -->
+    <div id="list-view">
+      <section id="results" aria-label="Fiches de veille" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></section>
+    </div>
+    <div id="kanban-view" hidden>
+      <section id="kanban" aria-label="Radar Tech" class="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0"></section>
+    </div>
+
+    <div id="empty-state" hidden class="rounded-xl border border-dashed border-neutral-800 px-6 py-16 text-center">
+      <p class="text-sm font-medium text-white">Aucune fiche ne correspond.</p>
+      <p class="mt-1 text-sm text-neutral-500">Essayez d'autres filtres.</p>
+      <button type="button" data-admin data-action="open-add" class="mt-4 inline-flex h-9 items-center rounded-md bg-white px-4 text-sm font-medium text-black hover:bg-neutral-200">Ajouter une ressource</button>
+    </div>
+  </main>
+
+  <!-- Mobile FAB -->
+  <button type="button" data-admin data-action="open-add" aria-label="Ajouter une ressource"
+    class="fixed bottom-5 right-5 z-20 grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/60 transition active:scale-95 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30 sm:hidden"
+    style="margin-bottom: env(safe-area-inset-bottom)">
+    <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+
+  <!-- iOS install hint -->
+  <div id="ios-hint" hidden role="note"
+    class="fixed inset-x-3 bottom-24 z-20 rounded-xl border border-neutral-800 bg-neutral-950/95 p-4 text-sm text-neutral-300 shadow-2xl backdrop-blur sm:hidden">
+    <p><strong class="text-white">Installer l'app :</strong> touchez <span aria-label="Partager">⎋ Partager</span> puis « Sur l'écran d'accueil ».</p>
+    <button type="button" data-action="dismiss-ios-hint" class="mt-2 text-xs text-neutral-500 underline underline-offset-4">Ne plus afficher</button>
+  </div>
+
+  <!-- Detail dialog -->
+  <dialog id="detail-dialog" aria-labelledby="detail-title"
+    class="m-0 mt-auto max-h-[92dvh] w-full max-w-none overflow-hidden rounded-t-2xl border border-neutral-800 bg-neutral-950 p-0 text-neutral-200 sm:m-auto sm:max-w-2xl sm:rounded-2xl">
+    <div id="detail-content" class="max-h-[92dvh] overflow-y-auto"></div>
+  </dialog>
+
+  <!-- Reader view -->
+  <dialog id="reader-dialog" aria-labelledby="reader-title"
+    class="m-0 h-dvh max-h-none w-full max-w-none bg-neutral-950 p-0 text-neutral-200 sm:m-auto sm:h-[92dvh] sm:max-w-3xl sm:rounded-2xl sm:border sm:border-neutral-800">
+    <div class="flex h-full flex-col">
+      <div class="flex items-center justify-between border-b border-neutral-800 px-5 py-3" style="padding-top: max(0.75rem, env(safe-area-inset-top))">
+        <span class="text-xs font-medium uppercase tracking-wider text-neutral-500">Mode lecture</span>
+        <button type="button" data-action="close-dialog" aria-label="Fermer la lecture" class="grid h-8 w-8 place-items-center rounded-md text-neutral-400 hover:bg-neutral-900 hover:text-white">
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="flex-1 overflow-y-auto">
+        <article id="reader-content" class="mx-auto max-w-prose px-5 py-8 [overflow-wrap:anywhere]" style="padding-bottom: max(2rem, env(safe-area-inset-bottom))"></article>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Digest dialog (admin) -->
+  <dialog id="digest-dialog" aria-labelledby="digest-title"
+    class="m-0 mt-auto max-h-[92dvh] w-full max-w-none overflow-hidden rounded-t-2xl border border-neutral-800 bg-neutral-950 p-0 text-neutral-200 sm:m-auto sm:max-w-2xl sm:rounded-2xl">
+    <div class="flex max-h-[92dvh] flex-col">
+      <div class="flex items-center justify-between border-b border-neutral-800 px-5 py-4">
+        <div>
+          <h2 id="digest-title" class="font-semibold text-white">Digest hebdomadaire</h2>
+          <p id="digest-count" class="text-xs text-neutral-500"></p>
+        </div>
+        <button type="button" data-action="close-dialog" aria-label="Fermer" class="grid h-8 w-8 place-items-center rounded-md text-neutral-400 hover:bg-neutral-900 hover:text-white">
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <pre id="digest-output" tabindex="0" aria-label="Markdown du digest" class="flex-1 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] bg-black p-5 font-mono text-xs leading-relaxed text-neutral-300"></pre>
+      <div class="flex justify-end gap-2 border-t border-neutral-800 px-5 py-4" style="padding-bottom: max(1rem, env(safe-area-inset-bottom))">
+        <button type="button" data-action="download-digest" class="h-9 rounded-md border border-neutral-800 px-4 text-sm text-neutral-300 hover:border-neutral-600 hover:text-white">Télécharger .md</button>
+        <button type="button" data-action="copy-digest" class="h-9 rounded-md bg-white px-4 text-sm font-medium text-black hover:bg-neutral-200">Copier le Markdown</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Login dialog -->
+  <dialog id="login-dialog" aria-labelledby="login-title"
+    class="m-auto w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-neutral-800 bg-neutral-950 p-0 text-neutral-200">
+    <form id="login-form" novalidate class="space-y-4 p-5">
+      <h2 id="login-title" class="font-semibold text-white">Connexion administrateur</h2>
+      <div>
+        <label for="l-user" class="mb-1.5 block text-xs font-medium text-neutral-400">Identifiant</label>
+        <input id="l-user" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false" class="field" />
+      </div>
+      <div>
+        <label for="l-pass" class="mb-1.5 block text-xs font-medium text-neutral-400">Mot de passe</label>
+        <input id="l-pass" name="password" type="password" required autocomplete="current-password" class="field" />
+      </div>
+      <p id="login-error" role="alert" class="hidden rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"></p>
+      <div class="flex justify-end gap-2">
+        <button type="button" data-action="close-dialog" class="h-9 rounded-md border border-neutral-800 px-4 text-sm text-neutral-300 hover:border-neutral-600 hover:text-white">Annuler</button>
+        <button type="submit" class="h-9 rounded-md bg-white px-4 text-sm font-medium text-black hover:bg-neutral-200 disabled:opacity-60">Se connecter</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Add / edit dialog -->
+  <dialog id="add-dialog" aria-labelledby="add-title"
+    class="m-0 mt-auto max-h-[92dvh] w-full max-w-none overflow-hidden rounded-t-2xl border border-neutral-800 bg-neutral-950 p-0 text-neutral-200 sm:m-auto sm:max-w-lg sm:rounded-2xl">
+    <form id="add-form" method="dialog" novalidate class="max-h-[92dvh] overflow-y-auto">
+      <div class="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-800 bg-neutral-950/95 px-5 py-4 backdrop-blur">
+        <h2 id="add-title" class="font-semibold text-white">Nouvelle ressource</h2>
+        <button type="button" data-action="close-dialog" aria-label="Fermer" class="grid h-8 w-8 place-items-center rounded-md text-neutral-400 hover:bg-neutral-900 hover:text-white">
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+
+      <div class="space-y-4 px-5 py-5">
+        <div>
+          <label for="f-title" class="mb-1.5 block text-xs font-medium text-neutral-400">Titre <span class="text-red-400">*</span></label>
+          <input id="f-title" name="title" required maxlength="120" class="field" placeholder="Ex. CSS Masonry Layout" />
+        </div>
+        <div>
+          <label for="f-summary" class="mb-1.5 block text-xs font-medium text-neutral-400">Résumé <span class="text-red-400">*</span></label>
+          <textarea id="f-summary" name="summary" required maxlength="600" rows="3" class="field" placeholder="En deux phrases : de quoi s'agit-il et pourquoi c'est important ?"></textarea>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="f-category" class="mb-1.5 block text-xs font-medium text-neutral-400">Catégorie</label>
+            <select id="f-category" name="category" class="field"></select>
+          </div>
+          <div>
+            <label for="f-status" class="mb-1.5 block text-xs font-medium text-neutral-400">Statut</label>
+            <select id="f-status" name="status" class="field"></select>
+          </div>
+        </div>
+        <div>
+          <label for="f-tags" class="mb-1.5 block text-xs font-medium text-neutral-400">Tags <span class="text-neutral-600">(séparés par des virgules)</span></label>
+          <input id="f-tags" name="tags" class="field" placeholder="layout, grid, baseline-2026" />
+        </div>
+        <div>
+          <label for="f-url" class="mb-1.5 block text-xs font-medium text-neutral-400">Lien officiel</label>
+          <input id="f-url" name="url" type="url" inputmode="url" class="field" placeholder="https://developer.mozilla.org/…" />
+        </div>
+        <div class="grid grid-cols-[1fr_auto] items-end gap-3">
+          <label for="f-code" class="block text-xs font-medium text-neutral-400">Exemple de code</label>
+          <select id="f-lang" name="lang" aria-label="Langage de l'exemple" class="field !h-8 !w-auto !py-0 text-xs">
+            <option value="css">CSS</option><option value="html">HTML</option><option value="js">JavaScript</option>
+            <option value="ts">TypeScript</option><option value="json">JSON</option><option value="bash">Bash</option><option value="text">Texte</option>
+          </select>
+        </div>
+        <textarea id="f-code" name="code" rows="5" spellcheck="false" class="field -mt-1 font-mono text-[13px]" placeholder=".grid { display: grid; grid-template-rows: masonry; }"></textarea>
+        <p id="form-error" role="alert" class="hidden rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"></p>
+      </div>
+
+      <div class="sticky bottom-0 flex justify-end gap-2 border-t border-neutral-800 bg-neutral-950/95 px-5 py-4 backdrop-blur" style="padding-bottom: max(1rem, env(safe-area-inset-bottom))">
+        <button type="button" data-action="close-dialog" class="h-9 rounded-md border border-neutral-800 px-4 text-sm text-neutral-300 hover:border-neutral-600 hover:text-white">Annuler</button>
+        <button type="submit" class="h-9 rounded-md bg-white px-4 text-sm font-medium text-black hover:bg-neutral-200 disabled:opacity-60">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <input id="import-input" type="file" accept="application/json,.json" hidden />
+
+  <!-- Toast -->
+  <div id="toast" role="status" aria-live="polite"
+    class="pointer-events-none fixed inset-x-0 bottom-24 z-50 mx-auto w-fit translate-y-2 rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-2.5 text-sm text-white opacity-0 shadow-xl transition duration-200 sm:bottom-8"></div>
+
+  <script type="text/tailwindcss">
+    @layer components {
+      .field {
+        @apply block w-full rounded-md border border-neutral-800 bg-black px-3 py-2 text-sm text-white placeholder:text-neutral-600 transition focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/10;
+      }
+      .field:is(input, select) { @apply h-10; }
+    }
+  </script>
+  <script src="./db.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

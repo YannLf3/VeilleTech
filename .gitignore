@@ -1,0 +1,6 @@
+node_modules/
+.env
+.DS_Store
+# Données d'exécution (fiches, sauvegardes) : volume Docker, jamais versionnées
+data/
+data.backup-*.json

@@ -1,0 +1,241 @@
+[
+  {
+    "id": "view-transitions",
+    "title": "View Transitions API",
+    "summary": "Anime les changements d'état du DOM (et la navigation entre documents) avec une simple API native, sans librairie d'animation.",
+    "category": "Standards Web",
+    "status": "recommended",
+    "tags": [
+      "animation",
+      "navigation",
+      "ux"
+    ],
+    "url": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API",
+    "lang": "js",
+    "code": "if (!document.startViewTransition) {\n  updateDOM();\n} else {\n  document.startViewTransition(() => updateDOM());\n}\n\n/* Navigation multi-pages (CSS) */\n/* @view-transition { navigation: auto; } */",
+    "date": "2026-09-01"
+  },
+  {
+    "id": "popover-api",
+    "title": "Popover API",
+    "summary": "Menus, tooltips et panneaux en top-layer avec gestion native du focus, de la touche Échap et du clic extérieur, sans JavaScript.",
+    "category": "Standards Web",
+    "status": "recommended",
+    "tags": [
+      "html",
+      "a11y",
+      "top-layer"
+    ],
+    "url": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API",
+    "lang": "html",
+    "code": "<button popovertarget=\"menu\">Menu</button>\n\n<div id=\"menu\" popover>\n  <a href=\"/profil\">Profil</a>\n  <a href=\"/logout\">Déconnexion</a>\n</div>",
+    "date": "2026-08-20"
+  },
+  {
+    "id": "speculation-rules",
+    "title": "Speculation Rules API",
+    "summary": "Prérendu ou préchargement déclaratif des pages probables pour des navigations quasi instantanées.",
+    "category": "Standards Web",
+    "status": "experimental",
+    "tags": [
+      "performance",
+      "navigation",
+      "chromium"
+    ],
+    "url": "https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API",
+    "lang": "html",
+    "code": "<script type=\"speculationrules\">\n{\n  \"prerender\": [{\n    \"where\": { \"href_matches\": \"/articles/*\" },\n    \"eagerness\": \"moderate\"\n  }]\n}\n</script>",
+    "date": "2026-07-12"
+  },
+  {
+    "id": "anchor-positioning",
+    "title": "CSS Anchor Positioning",
+    "summary": "Positionne un élément relativement à un autre (tooltips, menus) en pur CSS, avec repli automatique quand l'espace manque.",
+    "category": "CSS",
+    "status": "emergent",
+    "tags": [
+      "layout",
+      "tooltip",
+      "positioning"
+    ],
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_anchor_positioning",
+    "lang": "css",
+    "code": ".trigger { anchor-name: --trigger; }\n\n.tooltip {\n  position: fixed;\n  position-anchor: --trigger;\n  position-area: top;\n  position-try-fallbacks: flip-block;\n}",
+    "date": "2026-09-15"
+  },
+  {
+    "id": "css-has",
+    "title": "Sélecteur :has()",
+    "summary": "Le « sélecteur parent » tant attendu : styler un élément selon ses descendants ou ses frères suivants.",
+    "category": "CSS",
+    "status": "recommended",
+    "tags": [
+      "selectors",
+      "baseline"
+    ],
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/:has",
+    "lang": "css",
+    "code": "/* Carte avec image : layout en 2 colonnes */\n.card:has(> img) {\n  grid-template-columns: 120px 1fr;\n}\n\n/* Formulaire invalide : bouton atténué */\nform:has(:invalid) button[type=\"submit\"] {\n  opacity: .5;\n}",
+    "date": "2026-05-03"
+  },
+  {
+    "id": "container-queries",
+    "title": "Container Queries",
+    "summary": "Des composants réellement responsives qui s'adaptent à la taille de leur conteneur, et non plus du viewport.",
+    "category": "CSS",
+    "status": "recommended",
+    "tags": [
+      "responsive",
+      "layout",
+      "baseline"
+    ],
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries",
+    "lang": "css",
+    "code": ".sidebar { container: card / inline-size; }\n\n@container card (min-width: 400px) {\n  .card { display: flex; gap: 1rem; }\n}",
+    "date": "2026-04-18"
+  },
+  {
+    "id": "scroll-driven-animations",
+    "title": "Scroll-driven Animations",
+    "summary": "Lie une animation CSS à la progression du défilement ou à la visibilité d'un élément, sans JavaScript ni scroll listener.",
+    "category": "CSS",
+    "status": "experimental",
+    "tags": [
+      "animation",
+      "scroll",
+      "performance"
+    ],
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_scroll-driven_animations",
+    "lang": "css",
+    "code": "@keyframes grow { from { scale: 0 1; } }\n\n.progress-bar {\n  transform-origin: left;\n  animation: grow linear both;\n  animation-timeline: scroll(root);\n}",
+    "date": "2026-08-02"
+  },
+  {
+    "id": "css-scope",
+    "title": "@scope",
+    "summary": "Limite la portée des styles à un sous-arbre du DOM, avec une borne inférieure optionnelle (« donut scope »).",
+    "category": "CSS",
+    "status": "emergent",
+    "tags": [
+      "architecture",
+      "cascade"
+    ],
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/@scope",
+    "lang": "css",
+    "code": "@scope (.card) to (.card__content) {\n  img { border-radius: 8px; }\n  :scope { border: 1px solid #333; }\n}",
+    "date": "2026-09-10"
+  },
+  {
+    "id": "oklch",
+    "title": "Couleurs OKLCH",
+    "summary": "Espace colorimétrique perceptuellement uniforme : palettes cohérentes, gamut P3 et manipulation fiable avec color-mix().",
+    "category": "Design",
+    "status": "recommended",
+    "tags": [
+      "couleur",
+      "design-tokens",
+      "p3"
+    ],
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/color_value/oklch",
+    "lang": "css",
+    "code": ":root {\n  --brand: oklch(65% 0.2 265);\n  --brand-hover: oklch(from var(--brand) calc(l + 0.08) c h);\n  --brand-muted: color-mix(in oklch, var(--brand) 30%, black);\n}",
+    "date": "2026-06-22"
+  },
+  {
+    "id": "design-tokens-dtcg",
+    "title": "Format Design Tokens (W3C DTCG)",
+    "summary": "Format JSON standardisé pour échanger des design tokens entre outils de design et de développement.",
+    "category": "Design",
+    "status": "emergent",
+    "tags": [
+      "design-tokens",
+      "design-system",
+      "interop"
+    ],
+    "url": "https://www.designtokens.org/",
+    "lang": "json",
+    "code": "{\n  \"color\": {\n    \"brand\": {\n      \"$type\": \"color\",\n      \"$value\": \"#0070f3\",\n      \"$description\": \"Couleur principale\"\n    }\n  }\n}",
+    "date": "2026-09-05"
+  },
+  {
+    "id": "cube-css",
+    "title": "CUBE CSS",
+    "summary": "Méthodologie CSS « Composition, Utility, Block, Exception » qui embrasse la cascade au lieu de la combattre.",
+    "category": "Méthodologies",
+    "status": "recommended",
+    "tags": [
+      "architecture",
+      "cascade",
+      "naming"
+    ],
+    "url": "https://cube.fyi/",
+    "lang": "html",
+    "code": "<article class=\"card flow\" data-state=\"featured\">\n  <!-- Composition : .flow | Block : .card | Exception : data-state -->\n  <h2 class=\"text-step-2\">Titre</h2>\n</article>",
+    "date": "2026-03-14"
+  },
+  {
+    "id": "trunk-based",
+    "title": "Trunk-Based Development",
+    "summary": "Branches courtes fusionnées quotidiennement sur la branche principale, avec feature flags pour livrer en continu sans conflits géants.",
+    "category": "Méthodologies",
+    "status": "recommended",
+    "tags": [
+      "git",
+      "ci-cd",
+      "feature-flags"
+    ],
+    "url": "https://trunkbaseddevelopment.com/",
+    "lang": "bash",
+    "code": "git switch -c feat/filtre-tags\n# … petits commits, < 1 jour de travail\ngit pull --rebase origin main\ngit push -u origin feat/filtre-tags   # PR courte, merge rapide",
+    "date": "2026-02-27"
+  },
+  {
+    "id": "vite",
+    "title": "Vite",
+    "summary": "Outil de build front-end ultra-rapide : serveur de dev en ESM natif et build de production optimisé.",
+    "category": "Outils",
+    "status": "recommended",
+    "tags": [
+      "build",
+      "dx",
+      "esm"
+    ],
+    "url": "https://vite.dev/",
+    "lang": "bash",
+    "code": "npm create vite@latest mon-app -- --template vanilla\ncd mon-app && npm install && npm run dev",
+    "date": "2026-06-01"
+  },
+  {
+    "id": "biome",
+    "title": "Biome",
+    "summary": "Formateur et linter unifiés écrits en Rust, pensés comme alternative rapide au duo ESLint + Prettier.",
+    "category": "Outils",
+    "status": "emergent",
+    "tags": [
+      "lint",
+      "format",
+      "dx",
+      "rust"
+    ],
+    "url": "https://biomejs.dev/",
+    "lang": "bash",
+    "code": "npm i -D -E @biomejs/biome\nnpx @biomejs/biome init\nnpx @biomejs/biome check --write ./src",
+    "date": "2026-08-28"
+  },
+  {
+    "id": "tailwind-v4",
+    "title": "Tailwind CSS v4",
+    "summary": "Configuration « CSS-first » via @theme, moteur réécrit bien plus rapide et variables CSS natives pour tous les tokens.",
+    "category": "Outils",
+    "status": "recommended",
+    "tags": [
+      "css",
+      "utility-first",
+      "design-tokens"
+    ],
+    "url": "https://tailwindcss.com/blog/tailwindcss-v4",
+    "lang": "css",
+    "code": "@import \"tailwindcss\";\n\n@theme {\n  --color-brand: oklch(65% 0.2 265);\n  --font-display: \"Geist\", sans-serif;\n}",
+    "date": "2026-05-20"
+  }
+]

@@ -159,7 +159,7 @@ docker compose down              # arrêter
 
 ### 3.5 Première utilisation
 
-1. Cliquer sur le **cadenas** 🔒 en haut à droite et se connecter (identifiant `ADMIN_USERNAME`, par défaut `yannlf3`).
+1. Cliquer sur le **cadenas** 🔒 en haut à droite et se connecter (identifiant défini par `ADMIN_USERNAME` dans votre `.env`).
 2. Cliquer sur **« Lancer la veille web »** : la première récupération prend 2 à 3 minutes (traduction de tous les articles).
 3. Explorer les fiches, basculer en vue Kanban, générer le digest depuis le menu **⋯**.
 
@@ -173,7 +173,7 @@ Toutes les variables sont lues par `server.js` (via `dotenv`). Le fichier `.env`
 |---|---|---|---|
 | `PORT` | non | `3000` | Port HTTP du serveur. |
 | `JWT_SECRET` | **oui** | — | Secret de signature des jetons (≥ 32 caractères). |
-| `ADMIN_USERNAME` | non | `yannlf3` | Identifiant de l'administrateur unique. |
+| `ADMIN_USERNAME` | non | `admin` | Identifiant de l'administrateur unique (à personnaliser). |
 | `ADMIN_PASSWORD_HASH` | **oui** | — | Hash bcrypt du mot de passe (`npm run hash-password`). |
 | `CRON_SCHEDULE` | non | `0 8 * * 1` | Planification de la veille (syntaxe cron ; défaut : lundi 8 h). |
 | `CRON_TZ` | non | `Europe/Paris` | Fuseau horaire du cron. |
@@ -395,7 +395,7 @@ Exemple :
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:3000/api/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"yannlf3","password":"…"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+  -d '{"username":"<identifiant>","password":"<mot-de-passe>"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
 
 curl -X POST http://localhost:3000/api/force-fetch -H "Authorization: Bearer $TOKEN"
 ```

@@ -27,7 +27,7 @@ if (process.argv[2] === 'hash') {
 const {
   PORT = 3000,
   JWT_SECRET,
-  ADMIN_USERNAME = 'yannlf3',
+  ADMIN_USERNAME = 'admin',
   ADMIN_PASSWORD_HASH,
   CRON_SCHEDULE = '0 8 * * 1', // lundi 8h
   CRON_TZ = 'Europe/Paris',

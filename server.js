@@ -7,7 +7,6 @@
  * Générer le hash du mot de passe admin : npm run hash-password -- 'mon-mot-de-passe'
  */
 require('dotenv').config({ quiet: true });
-const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const express = require('express');
@@ -17,6 +16,7 @@ const bcrypt = require('bcryptjs');
 const cron = require('node-cron');
 const Parser = require('rss-parser');
 const veille = require('./veille');
+const { createStore } = require('./storage');
 
 if (process.argv[2] === 'hash') {
   if (!process.argv[3]) throw new Error('Usage : npm run hash-password -- <mot-de-passe>');
@@ -63,32 +63,34 @@ function exit(msg) {
 
 /* ---------------------------------- Données --------------------------------- */
 
-// Dossier data/ : monté en volume Docker (./data:/app/data) pour survivre aux redémarrages.
-// Sur Vercel, seul /tmp est inscriptible, et il est ÉPHÉMÈRE (propre à chaque instance) : voir README.
+// Stockage (storage.js) : Vercel Blob privé si BLOB_READ_WRITE_TOKEN / BLOB_STORE_ID est défini, sinon fichier.
+// Fichier : dossier data/ (volume Docker) ; sur Vercel sans Blob, /tmp ÉPHÉMÈRE (propre à chaque instance).
 const DATA_FILE = path.resolve(
   process.env.DATA_PATH || (IS_VERCEL ? '/tmp/techveille/data.json' : path.join(__dirname, 'data', 'data.json'))
 );
 const SEED_FILE = path.join(__dirname, 'data.seed.json');
-let items = [];
-let writeQueue = Promise.resolve();
+const store = createStore({ dataFile: DATA_FILE, seedFile: SEED_FILE });
+let items = []; // dernière version connue (rafraîchie avant chaque lecture/écriture)
 
-async function load() {
-  await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-  try {
-    items = JSON.parse(await fs.readFile(DATA_FILE, 'utf8'));
-  } catch (err) {
-    if (err.code !== 'ENOENT') throw err;
-    items = JSON.parse(await fs.readFile(SEED_FILE, 'utf8'));
-    await save();
+const httpError = (status, message) => Object.assign(new Error(message), { status });
+
+/**
+ * Modifie les fiches de façon sûre : relit la version la plus récente, applique `fn` (qui modifie le tableau
+ * en place et peut lever une httpError), puis enregistre. En cas d'écriture concurrente d'une autre instance
+ * (Vercel Blob), l'opération est rejouée sur les données à jour.
+ */
+async function mutate(fn) {
+  for (let attempt = 1; ; attempt++) {
+    items = await store.load(true);
+    const result = fn(items);
+    try {
+      await store.save(items);
+      return result;
+    } catch (err) {
+      if (err.code !== 'CONFLICT' || attempt >= 3) throw err;
+    }
   }
 }
-
-// Écritures sérialisées + atomiques (fichier temporaire puis rename).
-const save = () =>
-  (writeQueue = writeQueue.then(async () => {
-    await fs.writeFile(`${DATA_FILE}.tmp`, JSON.stringify(items, null, 2));
-    await fs.rename(`${DATA_FILE}.tmp`, DATA_FILE);
-  }));
 
 const { CATEGORIES } = veille;
 const STATUSES = ['emergent', 'experimental', 'recommended'];
@@ -174,12 +176,17 @@ async function fetchVeille() {
       console.warn('[veille] traduction échouée, article reporté :', c.url, err.message);
     }
   }
-  if (fresh.length) {
-    items.unshift(...fresh);
-    await save();
-  }
+  // Réappliqué sur la version la plus récente : une fiche ajoutée entre-temps n'est pas dupliquée.
+  const added = fresh.length
+    ? await mutate((list) => {
+        const urls = new Set(list.map((it) => it.url));
+        const newOnes = fresh.filter((it) => !urls.has(it.url));
+        list.unshift(...newOnes);
+        return newOnes.length;
+      })
+    : 0;
   return {
-    added: fresh.length,
+    added,
     rejected: candidates.length - fresh.length - untranslated,
     untranslated,
     failedFeeds: results.filter((r) => r.status === 'rejected').length,
@@ -207,12 +214,13 @@ const LOCK_MS = 15 * 60_000;
 
 /* ---------------------------------- App ----------------------------------- */
 
-const ready = load();
+const ready = store.load().then((list) => (items = list));
 
 const app = express();
 app.disable('x-powered-by');
 app.use(async (req, res, next) => {
   await ready; // première requête d'une instance : attend le chargement des données
+  if (req.method === 'GET' && req.path.startsWith('/api/')) items = await store.load(); // Blob : revalidé ≤ 15 s
   next();
 });
 if (TRUST_PROXY) app.set('trust proxy', 1);
@@ -255,43 +263,42 @@ app.get('/api/me', requireAuth, (req, res) => res.json({ username: req.user.sub 
 app.post('/api/items', requireAuth, async (req, res) => {
   const it = sanitize(req.body, crypto.randomUUID());
   if (!it) return res.status(400).json({ error: 'Titre et résumé requis.' });
-  items.unshift(it);
-  await save();
+  await mutate((list) => list.unshift(it));
   res.status(201).json(publicItem(it));
 });
 
 // /api/fiches/:id : alias utilisé par le Kanban (changement de statut).
 app.put(['/api/items/:id', '/api/fiches/:id'], requireAuth, async (req, res) => {
-  const i = items.findIndex((it) => it.id === req.params.id);
-  if (i === -1) return res.status(404).json({ error: 'Fiche introuvable.' });
-  const it = sanitize({ ...items[i], ...req.body }, items[i].id);
-  if (!it) return res.status(400).json({ error: 'Titre et résumé requis.' });
-  items[i] = it;
-  await save();
+  const it = await mutate((list) => {
+    const i = list.findIndex((x) => x.id === req.params.id);
+    if (i === -1) throw httpError(404, 'Fiche introuvable.');
+    const next = sanitize({ ...list[i], ...req.body }, list[i].id);
+    if (!next) throw httpError(400, 'Titre et résumé requis.');
+    return (list[i] = next);
+  });
   res.json(publicItem(it));
 });
 
 app.delete('/api/items/:id', requireAuth, async (req, res) => {
-  const before = items.length;
-  items = items.filter((it) => it.id !== req.params.id);
-  if (items.length === before) return res.status(404).json({ error: 'Fiche introuvable.' });
-  await save();
+  await mutate((list) => {
+    const i = list.findIndex((x) => x.id === req.params.id);
+    if (i === -1) throw httpError(404, 'Fiche introuvable.');
+    list.splice(i, 1);
+  });
   res.status(204).end();
 });
 
 app.post('/api/import', requireAuth, async (req, res) => {
   const raw = Array.isArray(req.body) ? req.body : req.body?.items;
   if (!Array.isArray(raw)) return res.status(400).json({ error: 'Tableau « items » attendu.' });
-  const byId = new Map(items.map((it) => [it.id, it]));
-  let added = 0;
-  for (const r of raw) {
-    const it = sanitize(r, validId(r?.id));
-    if (!it) continue;
-    if (!byId.has(it.id)) added++;
-    byId.set(it.id, it);
-  }
-  items = [...byId.values()];
-  await save();
+  const incoming = raw.map((r) => sanitize(r, validId(r?.id))).filter(Boolean);
+  const added = await mutate((list) => {
+    const byId = new Map(list.map((it) => [it.id, it]));
+    const count = incoming.filter((it) => !byId.has(it.id)).length;
+    incoming.forEach((it) => byId.set(it.id, it));
+    list.splice(0, list.length, ...byId.values());
+    return count;
+  });
   res.json({ added, total: items.length });
 });
 
@@ -346,7 +353,9 @@ if (!IS_VERCEL) {
     { timezone: CRON_TZ }
   );
   ready.then(() =>
-    app.listen(PORT, () => console.log(`TechVeille Hub → http://localhost:${PORT} (veille : "${CRON_SCHEDULE}" ${CRON_TZ})`))
+    app.listen(PORT, () =>
+      console.log(`TechVeille Hub → http://localhost:${PORT} (stockage : ${store.kind} · veille : "${CRON_SCHEDULE}" ${CRON_TZ})`)
+    )
   );
 }
 

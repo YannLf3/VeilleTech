@@ -11,7 +11,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY server.js veille.js data.seed.json ./
+COPY server.js veille.js storage.js data.seed.json ./
 COPY public ./public
 COPY scripts ./scripts
 

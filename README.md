@@ -83,14 +83,14 @@ L'objectif n'était donc pas de livrer un produit commercial, mais d'**évaluer 
 |---|---|---|
 | **Front-end** | HTML5 sémantique, **Tailwind CSS (CDN)**, **JavaScript vanilla en ESModules** | Aucun framework ni étape de build : l'application est légère et directement lisible. |
 | **Back-end** | **Node.js ≥ 20.12**, **Express 5** (CommonJS) | Serveur minimal qui sert à la fois l'API et les fichiers statiques. |
-| **Stockage serveur** | Fichier **JSON** (`data/data.json`) avec écriture atomique | Pas de base de données à installer ; suffisant pour quelques milliers de fiches. |
+| **Stockage serveur** | Fichier **JSON** (`data/data.json`, écriture atomique) ou **Vercel Blob** privé sur Vercel (`storage.js`) | Pas de base de données à installer ; suffisant pour quelques milliers de fiches. |
 | **Stockage client** | **IndexedDB** | Plus de capacité que `localStorage`, accessible au service worker. |
 | **Authentification** | **JWT** (`jsonwebtoken`, HS256) + mot de passe haché **bcrypt** (`bcryptjs`) | Standard, sans état côté serveur. |
 | **Veille** | `rss-parser` (flux RSS/Atom), `node-cron` (planification), `translate` (traduction gratuite, sans clé) | Uniquement des sources réelles, traduites automatiquement. |
 | **PWA** | Service Worker, Web App Manifest | Installation et fonctionnement hors-ligne. |
 | **Déploiement** | **Docker** (`node:20-alpine`) + **Docker Compose** | Image légère, données persistées dans un volume. |
 
-Dépendances npm (production uniquement) : `express`, `jsonwebtoken`, `bcryptjs`, `rss-parser`, `node-cron`, `translate`, `dotenv`, `cors`.
+Dépendances npm (production uniquement) : `express`, `jsonwebtoken`, `bcryptjs`, `rss-parser`, `node-cron`, `translate`, `@vercel/blob`, `dotenv`, `cors`.
 
 ---
 
@@ -184,6 +184,7 @@ Toutes les variables sont lues par `server.js` (via `dotenv`). Le fichier `.env`
 | `CORS_ORIGIN` | non | — | Origines autorisées si le front est servi depuis un autre domaine. |
 | `TRUST_PROXY` | non | — | À définir (`1`) derrière un reverse proxy, pour que la limitation des tentatives de connexion voie la vraie IP. |
 | `CRON_SECRET` | Vercel | — | Secret du Cron Job Vercel, vérifié par `GET /api/cron` (voir §14). |
+| `BLOB_READ_WRITE_TOKEN` | Vercel | — | Jeton Vercel Blob, ajouté automatiquement quand un store Blob est connecté ; active le stockage Blob (voir §14). |
 
 ---
 
@@ -233,6 +234,7 @@ Toutes les variables sont lues par `server.js` (via `dotenv`). Le fichier `.env`
 VeilleTech/
 ├── server.js                 # Serveur Express : API, auth, stockage, cron, digest
 ├── veille.js                 # Pipeline de veille (partagé serveur + scripts)
+├── storage.js                # Stockage des fiches : fichier JSON ou Vercel Blob
 ├── data.seed.json            # 15 fiches de départ (copiées au 1er lancement)
 ├── package.json              # Dépendances et scripts npm
 ├── package-lock.json         # Versions exactes des dépendances
@@ -246,7 +248,8 @@ VeilleTech/
 ├── README.md                 # Ce document
 ├── scripts/
 │   ├── clean-data.js         # Nettoyage ponctuel (déjà exécuté)
-│   └── migrate-categories.js # Migration ponctuelle des catégories (déjà exécutée)
+│   ├── migrate-categories.js # Migration ponctuelle des catégories (déjà exécutée)
+│   └── upload-to-blob.js     # Envoi des fiches locales vers Vercel Blob
 ├── public/                   # Tout le front-end, servi tel quel
 │   ├── index.html            # Structure de la page, modales, styles de base
 │   ├── app.js                # Application principale (module ES)
@@ -269,8 +272,9 @@ Organisé en sections :
 1. **Chargement de la configuration** (`dotenv`) et **vérifications au démarrage** : secret JWT, hash du mot de passe et expression cron doivent être valides, sinon arrêt avec un message explicite.
 2. **Mode utilitaire** : `node server.js hash <mdp>` affiche un hash bcrypt puis s'arrête (utilisé par `npm run hash-password`).
 3. **Données** :
-   - `load()` crée le dossier de données si besoin, lit `data.json` ou, à défaut, l'initialise depuis `data.seed.json`.
-   - `save()` écrit dans un fichier temporaire puis le **renomme** (opération atomique : pas de fichier corrompu en cas de coupure). Les écritures sont **sérialisées** dans une file de promesses pour éviter les écritures concurrentes.
+   - Le stockage est délégué à `storage.js` (`createStore()`), qui choisit le pilote **fichier** ou **Vercel Blob** (voir §6.6).
+   - `mutate(fn)` : toute modification (création, édition, suppression, import, veille) relit la version la plus récente, applique `fn`, puis enregistre ; en cas d'écriture concurrente d'une autre instance, l'opération est rejouée (3 tentatives maximum).
+   - Avant chaque requête `GET /api/*`, la copie en mémoire est revalidée (instantané en mode fichier, 15 s maximum en mode Blob).
    - `sanitize(raw, id)` valide et normalise toute fiche entrante : longueurs maximales, catégorie et statut limités aux valeurs autorisées, tags normalisés (minuscules, sans accents), URL limitée à `http(s)` (bloque `javascript:`), date au format `AAAA-MM-JJ`.
 4. **Veille** : `fetchVeille()` récupère tous les flux en parallèle (`Promise.allSettled` : un flux en panne n'empêche pas les autres), écarte les URL déjà connues, puis confie chaque article au pipeline de `veille.js`. `runVeille()` garantit **une seule exécution à la fois** : un deuxième déclenchement pendant une veille en cours réutilise la même promesse.
 5. **Authentification** : middleware `requireAuth` (vérifie l'en-tête `Authorization: Bearer <jwt>`) et limitation des tentatives de connexion.
@@ -333,7 +337,16 @@ Point d'entrée du front, organisé en sections :
 | `glossary.js` | module ES | Dictionnaire d'environ 35 concepts (formes françaises et anglaises) ; `annotate()` entoure la **première** occurrence de chaque concept d'un `<abbr title="définition">`. Travaille sur du texte déjà échappé, sans risque d'injection. |
 | `kanban.js` | module ES | `renderKanban()` génère les 3 colonnes ; `bindKanbanDnD()` branche **une seule fois** le glisser-déposer HTML5 natif (`dragstart`, `dragover`, `drop`…) par délégation. |
 
-### 6.6 Autres fichiers
+### 6.6 `storage.js` — le stockage
+
+Deux pilotes avec la même interface, `load(force?)` et `save(items)` :
+
+| Pilote | Quand | Fonctionnement |
+|---|---|---|
+| **fichier** | par défaut (local, Docker) | Lit `data.json` (ou l'initialise depuis `data.seed.json`) ; écrit dans un fichier temporaire puis le **renomme** (atomique : pas de fichier corrompu en cas de coupure) ; écritures **sérialisées**. |
+| **blob** | `BLOB_READ_WRITE_TOKEN` ou `BLOB_STORE_ID` défini | Blob **privé** `techveille/data.json` ; lecture avec `useCache: false` et `ifNoneMatch` (304 si inchangé) ; écriture conditionnelle `ifMatch` ; un refus (`BlobPreconditionFailedError`) devient une erreur `CONFLICT` que `mutate()` rejoue. |
+
+### 6.7 Autres fichiers
 
 - **`public/sw.js`** : service worker (voir [section 12](#12-pwa-et-fonctionnement-hors-ligne)).
 - **`public/manifest.json`** : nom, couleurs, mode `standalone`, icônes (dont une version *maskable* pour Android), raccourci « Mes favoris » (`?favs=1`).
@@ -575,15 +588,27 @@ L'application peut aussi être déployée sur [Vercel](https://vercel.com), qui 
    - facultatif : `FEED_URLS`, `FEED_LIMIT`.
 3. Déployer. Le cron apparaît dans **Settings → Cron Jobs**, d'où il peut aussi être déclenché manuellement.
 
-### ⚠️ Limite importante : stockage non persistant
+### Stockage persistant : Vercel Blob
 
-Le disque des fonctions Vercel est **en lecture seule**, à l'exception de `/tmp`, qui est **éphémère** et propre à chaque instance. Sur Vercel, les fiches sont donc stockées dans `/tmp/techveille/data.json`, initialisé depuis `data.seed.json` (15 fiches) :
+Le disque des fonctions Vercel est en lecture seule (sauf `/tmp`, éphémère et propre à chaque instance). Les fiches sont donc stockées dans **Vercel Blob**, un stockage de fichiers géré par Vercel, via le module `storage.js` :
 
-- les fiches ajoutées, modifiées ou récupérées par la veille **disparaissent** quand l'instance est recyclée ;
-- deux instances simultanées peuvent afficher des données différentes ;
-- la limitation des tentatives de connexion est, elle aussi, propre à chaque instance.
+- **Sélection automatique** : si `BLOB_READ_WRITE_TOKEN` (ou `BLOB_STORE_ID`) est défini, les fiches vont dans le Blob **privé** `techveille/data.json` ; sinon, dans le fichier local (`data/data.json`, ou `/tmp` sur Vercel — éphémère).
+- **Accès privé** : le fichier n'est lisible qu'avec le jeton du projet, jamais par une URL publique.
+- **Plusieurs instances, aucune perte** : chaque écriture relit la dernière version puis écrit **conditionnellement** (`ifMatch` sur l'ETag). Si une autre instance a écrit entre-temps, Vercel Blob refuse l'écriture et l'opération est **rejouée** sur les données à jour (fonction `mutate()` de `server.js`).
+- **Lectures** : chaque instance garde une copie en mémoire, revalidée au plus toutes les 15 secondes (réponse `304` si rien n'a changé) : une modification faite sur une instance est visible partout en 15 s maximum.
+- **Premier démarrage** : un Blob vide est initialisé avec les 15 fiches de `data.seed.json`.
 
-Le déploiement Vercel convient donc à une **démonstration**. Pour un usage réel, il faut un stockage externe (par exemple **Vercel Blob**, **Upstash Redis** ou **Neon Postgres**, disponibles via le Marketplace Vercel) ; le déploiement **Docker**, lui, persiste les données dans `./data`.
+**Mise en place :**
+
+1. Dans le projet Vercel : **Storage → Create → Blob**, puis connecter le store au projet. Vercel ajoute automatiquement la variable `BLOB_READ_WRITE_TOKEN`.
+2. Redéployer.
+3. *(Facultatif)* Envoyer vos fiches locales, contenu du mode lecture compris : copier `BLOB_READ_WRITE_TOKEN` depuis Vercel, puis
+   ```bash
+   BLOB_READ_WRITE_TOKEN=… node scripts/upload-to-blob.js
+   ```
+   Le script refuse d'écraser un Blob contenant déjà des fiches, sauf avec `--force`.
+
+**À savoir :** la limitation des tentatives de connexion reste propre à chaque instance ; les scripts `clean-data.js` et `migrate-categories.js` ne travaillent que sur le fichier local.
 
 ---
 
@@ -594,8 +619,9 @@ Le déploiement Vercel convient donc à une **démonstration**. Pour un usage r�
 | `npm run hash-password -- '<mdp>'` | Génère le hash bcrypt du mot de passe admin. |
 | `node scripts/clean-data.js [--dry-run]` | Nettoyage ponctuel : filtre, dédoublonne, traduit et reclasse les fiches `#auto`. **Déjà exécuté** ; conçu pour des fiches en anglais, à ne pas relancer sur des fiches déjà traduites. |
 | `node scripts/migrate-categories.js [--dry-run]` | Reclasse les anciennes fiches vers « Intelligence Artificielle » / « Écosystème / Frameworks ». **Déjà exécuté.** |
+| `BLOB_READ_WRITE_TOKEN=… node scripts/upload-to-blob.js [--force]` | Envoie `data/data.json` dans Vercel Blob (voir §14). |
 
-Tous deux créent une sauvegarde `data.backup-<horodatage>.json` avant d'écrire, et doivent être lancés **serveur arrêté** (le serveur garde les fiches en mémoire et pourrait écraser les modifications à sa prochaine sauvegarde).
+Les deux scripts de nettoyage et de migration créent une sauvegarde `data.backup-<horodatage>.json` avant d'écrire, et doivent être lancés **serveur arrêté** (le serveur garde les fiches en mémoire et pourrait écraser les modifications à sa prochaine sauvegarde).
 
 ---
 
@@ -605,7 +631,7 @@ Tous deux créent une sauvegarde `data.backup-<horodatage>.json` avant d'écrire
 - **Moteur de traduction non officiel** : il peut limiter le débit ou changer ; les articles concernés sont alors simplement reportés.
 - **Tailwind via CDN** : pratique mais déconseillé en production (poids, dépendance réseau) ; passer à Tailwind CLI serait plus propre.
 - **Infobulles natives** (`title`) : invisibles au clavier et au toucher.
-- **Vercel** : stockage éphémère (`/tmp`), voir §14 — un stockage externe serait nécessaire pour un usage réel.
+- **Vercel** : sans store Blob connecté, stockage éphémère (`/tmp`) ; avec Blob, les modifications mettent jusqu'à 15 s à apparaître sur les autres instances.
 - **Stockage JSON** : adapté à un usage personnel ; au-delà de quelques milliers de fiches ou avec plusieurs éditeurs, SQLite serait préférable.
 - **Un seul administrateur**, jeton conservé côté client (un cookie `httpOnly` serait plus sûr, au prix d'une protection CSRF).
 - **Catégorisation par mots-clés** : simple et prévisible, mais imparfaite sur les articles ambigus.

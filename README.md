@@ -19,7 +19,8 @@ Concrètement :
   4. élargissement du périmètre (IA, écosystème), digest hebdomadaire, mode lecture, filtres temporels ;
   5. anti-spam, source unique des catégories, migration des données ;
   6. vue Kanban, recherche tolérante aux fautes, infobulles, hors-ligne IndexedDB, Docker ;
-  7. corrections (cache du service worker, `.gitignore`) et ce README.
+  7. corrections (cache du service worker, `.gitignore`) et ce README ;
+  8. déploiement serverless sur Vercel (Cron Job sécurisé) puis stockage persistant **Vercel Blob**.
 - À chaque étape, Claude a **testé son propre travail** (requêtes HTTP, navigateur piloté, tests hors-ligne, build Docker), signalé les limites et demandé confirmation avant les actions destructrices (ex. suppression de fiches).
 
 L'objectif n'était donc pas de livrer un produit commercial, mais d'**évaluer ce qu'un assistant IA peut produire** en termes d'architecture, de qualité de code, de rigueur et de communication. Le résultat reste une application fonctionnelle et utilisable au quotidien.
@@ -41,7 +42,7 @@ L'objectif n'était donc pas de livrer un produit commercial, mais d'**évaluer 
 11. [Le front-end en détail](#11-le-front-end-en-détail)
 12. [PWA et fonctionnement hors-ligne](#12-pwa-et-fonctionnement-hors-ligne)
 13. [Déploiement Docker](#13-déploiement-docker)
-14. [Déploiement Vercel (serverless)](#14-déploiement-vercel-serverless)
+14. [Déploiement Vercel (serverless + Vercel Blob)](#14-déploiement-vercel-serverless--vercel-blob)
 15. [Scripts de maintenance](#15-scripts-de-maintenance)
 16. [Limites connues et pistes d'amélioration](#16-limites-connues-et-pistes-damélioration)
 
@@ -158,7 +159,11 @@ docker compose down              # arrêter
 
 > ⚠️ Ne lancez pas `npm run dev` et Docker en même temps : ils utilisent le même port (3000) et le même fichier de données.
 
-### 3.5 Première utilisation
+### 3.5 Déploiement sur Vercel
+
+Hébergement serverless, sans serveur à gérer, avec stockage persistant **Vercel Blob** et veille planifiée par **Vercel Cron**. Procédure complète pas à pas en [section 14](#14-déploiement-vercel-serverless--vercel-blob).
+
+### 3.6 Première utilisation
 
 1. Cliquer sur le **cadenas** 🔒 en haut à droite et se connecter (identifiant défini par `ADMIN_USERNAME` dans votre `.env`).
 2. Cliquer sur **« Lancer la veille web »** : la première récupération prend 2 à 3 minutes (traduction de tous les articles).
@@ -208,7 +213,7 @@ Toutes les variables sont lues par `server.js` (via `dotenv`). Le fichier `.env`
 │   ├── /api/*          API REST (lecture publique, écriture JWT)         │
 │   ├── fichiers statiques de public/                                     │
 │   ├── node-cron       veille planifiée (lundi 8 h)                      │
-│   └── data/data.json  stockage (écriture atomique)                      │
+│   └── storage.js      data/data.json (local, Docker) ou Vercel Blob     │
 │                                                                         │
 │  veille.js  pipeline : RSS → filtres → traduction FR → catégorie → tags │
 └──────────────────────────────┬──────────────────────────────────────────┘
@@ -220,7 +225,7 @@ Toutes les variables sont lues par `server.js` (via `dotenv`). Le fichier `.env`
 
 **Principes directeurs :**
 
-- **Un seul processus** Node sert l'API et le front : pas de CORS à gérer, déploiement simple.
+- **Un seul processus** Node sert l'API et le front : pas de CORS à gérer, déploiement simple (en local, sous Docker, ou comme fonction serverless unique sur Vercel).
 - **Lecture publique, écriture protégée** : tout le monde peut consulter, seul l'administrateur modifie.
 - **Validation côté serveur** (fonction `sanitize()`), **échappement systématique côté client** (fonction `esc()`) : aucune donnée n'est injectée en HTML sans être échappée.
 - **Aucun contenu inventé** : la veille ne fait qu'ingérer, nettoyer, résumer par extraction (phrases d'origine) et traduire des flux réels.
@@ -541,7 +546,7 @@ Tout article ouvert une fois en mode lecture est également conservé et reste l
 FROM node:20-alpine                     # image légère
 ENV NODE_ENV=production PORT=3000 DATA_PATH=/app/data/data.json
 COPY package*.json → npm ci --omit=dev  # dépendances de prod, couche mise en cache
-COPY server.js veille.js data.seed.json public/ scripts/
+COPY server.js veille.js storage.js data.seed.json public/ scripts/
 USER node                               # utilisateur non-root
 HEALTHCHECK → GET /api/categories       # Docker sait si l'app répond
 ```
@@ -559,7 +564,7 @@ Image finale : environ 200 Mo. Le `.dockerignore` exclut `.env`, `data/`, `node_
 
 ---
 
-## 14. Déploiement Vercel (serverless)
+## 14. Déploiement Vercel (serverless + Vercel Blob)
 
 L'application peut aussi être déployée sur [Vercel](https://vercel.com), qui détecte Express **sans configuration** :
 
@@ -579,36 +584,63 @@ L'application peut aussi être déployée sur [Vercel](https://vercel.com), qui 
 - Aucune règle de redirection n'est nécessaire dans `vercel.json` : Vercel envoie automatiquement vers la fonction Express toute requête qui ne correspond pas à un fichier de `public/`.
 - Durée maximale d'une fonction : 300 s par défaut, suffisant pour une veille (environ 2 à 3 minutes au premier passage).
 
-### Mise en ligne
+### Mise en ligne pas à pas (avec stockage Vercel Blob)
 
-1. Sur [vercel.com/new](https://vercel.com/new), importer le dépôt GitHub (ou lancer `npx vercel` dans le dossier).
-2. Dans **Settings → Environment Variables**, définir :
-   - `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` (coller le hash **sans apostrophes** : l'interface Vercel prend la valeur telle quelle) ;
-   - `CRON_SECRET` : une chaîne aléatoire d'au moins 16 caractères ;
-   - facultatif : `FEED_URLS`, `FEED_LIMIT`.
-3. Déployer. Le cron apparaît dans **Settings → Cron Jobs**, d'où il peut aussi être déclenché manuellement.
+1. **Importer le projet** : sur [vercel.com/new](https://vercel.com/new), importer le dépôt GitHub (framework détecté : *Express*). Tant que les variables obligatoires ne sont pas définies, le build réussit mais l'application répond par des erreurs : c'est normal.
+2. **Créer le stockage Blob** : dans le projet, onglet **Storage → Create → Blob**, choisir un nom, puis **connecter** le store au projet (environnements *Production* et, si souhaité, *Preview*). Vercel ajoute automatiquement la variable `BLOB_READ_WRITE_TOKEN`.
+3. **Définir les variables** dans **Settings → Environment Variables** :
 
-### Stockage persistant : Vercel Blob
+   | Variable | Valeur |
+   |---|---|
+   | `JWT_SECRET` | chaîne aléatoire ≥ 32 caractères (voir §3.2) |
+   | `ADMIN_USERNAME` | votre identifiant d'administration (évitez un nom devinable) |
+   | `ADMIN_PASSWORD_HASH` | hash bcrypt de `npm run hash-password`, collé **sans apostrophes** (l'interface Vercel prend la valeur telle quelle, contrairement au fichier `.env`) |
+   | `CRON_SECRET` | chaîne aléatoire ≥ 16 caractères |
+   | `FEED_URLS`, `FEED_LIMIT` | facultatif |
 
-Le disque des fonctions Vercel est en lecture seule (sauf `/tmp`, éphémère et propre à chaque instance). Les fiches sont donc stockées dans **Vercel Blob**, un stockage de fichiers géré par Vercel, via le module `storage.js` :
+4. **Redéployer** (onglet **Deployments → ⋯ → Redeploy**) : les variables ne sont prises en compte qu'au déploiement suivant.
+5. **Transférer vos fiches existantes** *(facultatif)* : sans cette étape, le Blob démarre avec les 15 fiches de `data.seed.json`. Pour envoyer vos fiches locales (texte du mode lecture compris), copier le jeton depuis **Storage → votre store Blob → onglet `.env.local`**, puis, sur votre machine :
+   ```bash
+   BLOB_READ_WRITE_TOKEN=vercel_blob_rw_… node scripts/upload-to-blob.js
+   ```
+   Le script refuse d'écraser un Blob contenant déjà des fiches, sauf avec `--force`. Aucun redéploiement n'est nécessaire : les instances relisent le Blob en 15 s maximum.
+6. **Vérifier** :
+   - ouvrir l'URL du projet : les fiches s'affichent ;
+   - se connecter (cadenas 🔒), créer une fiche de test, puis **redéployer** : la fiche doit toujours être là (preuve que le stockage est bien le Blob) ;
+   - **Settings → Cron Jobs** : le job `/api/cron` est listé et peut être lancé manuellement (bouton *Run*) pour tester la veille.
+
+> Le jeton `BLOB_READ_WRITE_TOKEN` donne un accès complet en lecture et écriture au store : ne le versionnez jamais et ne le partagez pas (il n'apparaît que dans les variables Vercel et, ponctuellement, dans votre terminal).
+
+### Comment fonctionne le stockage Blob
+
+Le disque des fonctions Vercel est en lecture seule (sauf `/tmp`, éphémère et propre à chaque instance). Les fiches sont donc stockées dans **Vercel Blob**, un stockage de fichiers géré par Vercel, via le module `storage.js` (§6.6) :
+
+```
+ Instance A ─┐                         ┌─ lecture : get(useCache:false, ifNoneMatch) → 200 ou 304
+ Instance B ─┼──► Vercel Blob (privé) ─┤
+ Instance C ─┘   techveille/data.json  └─ écriture : put(ifMatch: ETag lu) → OK, ou refus si
+                                           une autre instance a écrit entre-temps → rejouée
+```
 
 - **Sélection automatique** : si `BLOB_READ_WRITE_TOKEN` (ou `BLOB_STORE_ID`) est défini, les fiches vont dans le Blob **privé** `techveille/data.json` ; sinon, dans le fichier local (`data/data.json`, ou `/tmp` sur Vercel — éphémère).
 - **Accès privé** : le fichier n'est lisible qu'avec le jeton du projet, jamais par une URL publique.
-- **Plusieurs instances, aucune perte** : chaque écriture relit la dernière version puis écrit **conditionnellement** (`ifMatch` sur l'ETag). Si une autre instance a écrit entre-temps, Vercel Blob refuse l'écriture et l'opération est **rejouée** sur les données à jour (fonction `mutate()` de `server.js`).
+- **Plusieurs instances, aucune perte** : chaque écriture relit la dernière version puis écrit **conditionnellement** (`ifMatch` sur l'ETag). Si une autre instance a écrit entre-temps, Vercel Blob refuse l'écriture et l'opération est **rejouée** sur les données à jour (fonction `mutate()` de `server.js`, 3 tentatives maximum).
 - **Lectures** : chaque instance garde une copie en mémoire, revalidée au plus toutes les 15 secondes (réponse `304` si rien n'a changé) : une modification faite sur une instance est visible partout en 15 s maximum.
 - **Premier démarrage** : un Blob vide est initialisé avec les 15 fiches de `data.seed.json`.
+- **Local et Docker ne changent pas** : sans jeton Blob, le stockage reste le fichier `data/data.json`.
 
-**Mise en place :**
+**À savoir :** la limitation des tentatives de connexion reste propre à chaque instance ; les scripts `clean-data.js` et `migrate-categories.js` ne travaillent que sur le fichier local ; l'usage de Vercel Blob est soumis aux quotas de votre offre Vercel (voir le tableau de bord **Usage**).
 
-1. Dans le projet Vercel : **Storage → Create → Blob**, puis connecter le store au projet. Vercel ajoute automatiquement la variable `BLOB_READ_WRITE_TOKEN`.
-2. Redéployer.
-3. *(Facultatif)* Envoyer vos fiches locales, contenu du mode lecture compris : copier `BLOB_READ_WRITE_TOKEN` depuis Vercel, puis
-   ```bash
-   BLOB_READ_WRITE_TOKEN=… node scripts/upload-to-blob.js
-   ```
-   Le script refuse d'écraser un Blob contenant déjà des fiches, sauf avec `--force`.
+### Dépannage
 
-**À savoir :** la limitation des tentatives de connexion reste propre à chaque instance ; les scripts `clean-data.js` et `migrate-categories.js` ne travaillent que sur le fichier local.
+| Symptôme | Cause probable | Solution |
+|---|---|---|
+| L'application répond « 500 » (logs : `[config] JWT_SECRET manquant…`) | Variables obligatoires absentes | Étape 3, puis redéployer. |
+| Les fiches ajoutées disparaissent après un redéploiement | Store Blob non connecté (stockage `/tmp` éphémère) | Étape 2, vérifier que `BLOB_READ_WRITE_TOKEN` existe pour l'environnement concerné, puis redéployer. |
+| Connexion refusée avec le bon mot de passe | Hash collé avec ses apostrophes, ou `ADMIN_USERNAME` différent | Recoller le hash **sans** apostrophes ; vérifier l'identifiant ; redéployer. |
+| Le cron répond `401` dans ses logs | `CRON_SECRET` absent ou modifié sans redéploiement | Définir `CRON_SECRET`, puis redéployer. |
+| `upload-to-blob.js` : « BLOB_READ_WRITE_TOKEN manquant » | Jeton non fourni au script | Le passer devant la commande (étape 5). |
+| `upload-to-blob.js` : « Le Blob contient déjà … fiches » | Le Blob a déjà des données | Relancer avec `--force` **seulement** pour remplacer volontairement les données en ligne. |
 
 ---
 

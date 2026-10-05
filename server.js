@@ -150,7 +150,8 @@ let running = null;
  * enregistré : son URL restant inconnue, il sera retenté au prochain passage.
  */
 async function fetchVeille() {
-  const known = new Set(items.map((it) => it.url));
+  const current = await store.load(true); // lecture initiale des articles existants
+  const known = new Set(current.map((it) => it.url));
   const results = await Promise.allSettled(
     FEEDS.map(async (url) => ({ url, feed: await parser.parseURL(url) }))
   );
@@ -172,7 +173,7 @@ async function fetchVeille() {
   for (const c of candidates.filter(veille.isRelevant).sort(veille.bySourceLang)) {
     try {
       const fiche = await veille.toFiche(c);
-      if (veille.isDuplicate(fiche.title, [...items, ...fresh])) continue;
+      if (veille.isDuplicate(fiche.title, [...current, ...fresh])) continue;
       const it = sanitize(fiche, `auto-${crypto.createHash('sha1').update(c.url).digest('hex').slice(0, 12)}`);
       if (it) fresh.push(it);
     } catch (err) {
@@ -180,16 +181,14 @@ async function fetchVeille() {
       console.warn('[veille] traduction échouée, article reporté :', c.url, err.message);
     }
   }
-  // Le scraping (long) est terminé : seulement maintenant on relit les données courantes (nouvel ETag),
-  // on fusionne et on écrit. mutate() rejoue lecture + fusion + save() si l'ETag change entre-temps.
-  const added = fresh.length
-    ? await mutate((list) => {
-        const urls = new Set(list.map((it) => it.url));
-        const newOnes = fresh.filter((it) => !urls.has(it.url) && !veille.isDuplicate(it.title, list));
-        list.unshift(...newOnes);
-        return newOnes.length;
-      })
-    : 0;
+  // Sauvegarde directe, sans vérification de version (forceOverwrite) : pas d'erreur CONFLICT possible.
+  let added = 0;
+  if (fresh.length) {
+    const merged = [...fresh, ...current];
+    await store.save(merged, { forceOverwrite: true });
+    items = merged;
+    added = fresh.length;
+  }
   return {
     added,
     rejected: candidates.length - fresh.length - untranslated,

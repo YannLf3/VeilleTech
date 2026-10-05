@@ -35,7 +35,7 @@ function fileStore({ dataFile, seedFile }) {
       return cache;
     },
     // Écritures sérialisées + atomiques (fichier temporaire puis rename).
-    save(items) {
+    save(items, _opts) { // pas de concurrence possible : forceOverwrite sans objet ici
       cache = items;
       return (queue = queue.then(async () => {
         await fs.writeFile(`${dataFile}.tmp`, JSON.stringify(items, null, 2));
@@ -63,7 +63,8 @@ function blobStore({ seedFile, pathname = 'techveille/data.json', ttl = 15_000 }
       etag = res.blob.etag;
       return cache;
     },
-    async save(items) {
+    // forceOverwrite : écriture inconditionnelle (sans ifMatch), écrase la version distante.
+    async save(items, { forceOverwrite = false } = {}) {
       try {
         const result = await put(pathname, JSON.stringify(items), {
           access: 'private',
@@ -71,7 +72,7 @@ function blobStore({ seedFile, pathname = 'techveille/data.json', ttl = 15_000 }
           addRandomSuffix: false,
           contentType: 'application/json',
           cacheControlMaxAge: 60,
-          ...(etag ? { ifMatch: etag } : {}),
+          ...(etag && !forceOverwrite ? { ifMatch: etag } : {}),
         });
         etag = result.etag;
         cache = items;

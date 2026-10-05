@@ -77,7 +77,11 @@ function blobStore({ seedFile, pathname = 'techveille/data.json', ttl = 15_000 }
         cache = items;
         fetchedAt = Date.now();
       } catch (err) {
-        if (err instanceof BlobPreconditionFailedError) throw conflict();
+        if (err instanceof BlobPreconditionFailedError) {
+          cache = null; // ETag périmé : la prochaine lecture refait un GET complet, sans ifNoneMatch
+          etag = null;
+          throw conflict();
+        }
         throw err;
       }
     },

@@ -79,15 +79,19 @@ const httpError = (status, message) => Object.assign(new Error(message), { statu
  * en place et peut lever une httpError), puis enregistre. En cas d'écriture concurrente d'une autre instance
  * (Vercel Blob), l'opération est rejouée sur les données à jour.
  */
+const MUTATE_ATTEMPTS = 6;
 async function mutate(fn) {
   for (let attempt = 1; ; attempt++) {
-    items = await store.load(true);
-    const result = fn(items);
+    // Copie de travail : un essai raté ne pollue pas la copie partagée du store.
+    const draft = structuredClone(await store.load(true));
+    const result = fn(draft);
     try {
-      await store.save(items);
+      await store.save(draft);
+      items = draft;
       return result;
     } catch (err) {
-      if (err.code !== 'CONFLICT' || attempt >= 3) throw err;
+      if (err.code !== 'CONFLICT' || attempt >= MUTATE_ATTEMPTS) throw err;
+      await new Promise((r) => setTimeout(r, 100 * attempt + Math.random() * 150)); // backoff + jitter
     }
   }
 }
@@ -176,11 +180,12 @@ async function fetchVeille() {
       console.warn('[veille] traduction échouée, article reporté :', c.url, err.message);
     }
   }
-  // Réappliqué sur la version la plus récente : une fiche ajoutée entre-temps n'est pas dupliquée.
+  // Le scraping (long) est terminé : seulement maintenant on relit les données courantes (nouvel ETag),
+  // on fusionne et on écrit. mutate() rejoue lecture + fusion + save() si l'ETag change entre-temps.
   const added = fresh.length
     ? await mutate((list) => {
         const urls = new Set(list.map((it) => it.url));
-        const newOnes = fresh.filter((it) => !urls.has(it.url));
+        const newOnes = fresh.filter((it) => !urls.has(it.url) && !veille.isDuplicate(it.title, list));
         list.unshift(...newOnes);
         return newOnes.length;
       })

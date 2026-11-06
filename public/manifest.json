@@ -1,7 +1,7 @@
 {
   "name": "TechVeille Hub",
   "short_name": "TechVeille",
-  "description": "Veille technologique front-end : standards web, CSS, design, méthodologies et outils.",
+  "description": "Veille tech et gaming : standards web, CSS, design, IA, outils et actualités jeux vidéo.",
   "id": "./",
   "start_url": "./?source=pwa",
   "scope": "./",

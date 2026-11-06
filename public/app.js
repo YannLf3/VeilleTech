@@ -25,6 +25,9 @@ import { COLUMNS, renderKanban, bindKanbanDnD } from './kanban.js';
 /** Catégories officielles, chargées depuis GET /api/categories (source unique : veille.js). */
 let categories = [];
 const PERIODS = [['all', 'Toutes les fiches'], ['7', 'Cette semaine'], ['30', 'Ce mois-ci']]; // tableau : ordre garanti
+// Puces de la catégorie Gaming : [tag, libellé]. Le tag est posé à l'ingestion → garder synchronisé avec GAMES (veille.js).
+const GAME_CHIPS = [['valorant', 'Valorant'], ['fortnite', 'Fortnite'], ['minecraft', 'Minecraft'], ['call-of-duty', 'Call of Duty']];
+const GAME_TAGS = new Set(GAME_CHIPS.map(([tag]) => tag));
 
 export const STATUSES = {
   emergent: { label: 'Émergent', emoji: '🔥', badge: 'bg-orange-500/10 text-orange-300 ring-orange-500/25' },
@@ -77,6 +80,15 @@ const saveFavorites = () => {
   channel?.postMessage('favs');
 };
 
+/** Fiches déjà ouvertes (IndexedDB, clé « read »), propres à ce navigateur. */
+const readIds = new Set();
+let readKnown = false; // false tant qu'aucune liste n'a été enregistrée (tout 1er lancement)
+const saveRead = () => {
+  store.set('read', [...readIds]);
+  channel?.postMessage('read');
+};
+const isNew = (it) => !readIds.has(it.id);
+
 const allItems = () => items;
 const findItem = (id) => items.find((it) => it.id === id);
 
@@ -96,6 +108,11 @@ async function loadPrefs() {
   }
   const favs = await store.get('favs', []);
   (Array.isArray(favs) ? favs : []).forEach((id) => favorites.add(id));
+  const read = await store.get('read', null);
+  if (Array.isArray(read)) {
+    readKnown = true;
+    read.forEach((id) => readIds.add(id));
+  }
   auth.token = await store.get('token', null);
   view = await store.get('view', 'list');
 }
@@ -137,8 +154,27 @@ async function loadItems() {
     toast(items.length ? 'Hors-ligne : dernière version enregistrée affichée.' : 'Impossible de charger les fiches.');
   }
   itemsLoaded = true;
+  syncReadState();
   render();
   refreshDetail();
+}
+
+/**
+ * 1er lancement : tout ce qui existe déjà est considéré comme lu (seules les arrivées futures seront « Nouveau »).
+ * Ensuite : on oublie les ids des fiches disparues (purge, suppression) pour que la liste reste petite.
+ */
+function syncReadState() {
+  if (!items.length) return;
+  if (!readKnown) {
+    items.forEach((it) => readIds.add(it.id));
+    readKnown = true;
+    return saveRead();
+  }
+  const present = new Set(items.map((it) => it.id));
+  const gone = [...readIds].filter((id) => !present.has(id));
+  if (!gone.length) return;
+  gone.forEach((id) => readIds.delete(id));
+  saveRead();
 }
 
 /** @param {boolean} persist false quand l'info vient d'un autre onglet (évite l'écho). */
@@ -165,10 +201,11 @@ const state = {
   status: 'all',
   tag: null,
   favsOnly: false,
+  unreadOnly: false,
   period: 'all', // 'all' | '7' | '30' (jours)
   sort: 'desc', // 'desc' = plus récents d'abord
 };
-const DEFAULT_FILTERS = { query: '', category: 'all', status: 'all', tag: null, favsOnly: false, period: 'all' };
+const DEFAULT_FILTERS = { query: '', category: 'all', status: 'all', tag: null, favsOnly: false, unreadOnly: false, period: 'all' };
 
 const normalize = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -181,6 +218,7 @@ function getFilteredItems() {
       if (view === 'list' && state.status !== 'all' && it.status !== state.status) return false;
       if (state.tag && !it.tags.includes(state.tag)) return false;
       if (state.favsOnly && !favorites.has(it.id)) return false;
+      if (state.unreadOnly && !isNew(it)) return false;
       if (since && it.date < since) return false;
       if (terms.length) {
         const text = normalize([it.title, it.summary, it.category, it.source ?? '', ...it.tags].join(' '));
@@ -261,8 +299,43 @@ function renderStatusFilters() {
     .join('');
 }
 
+/** Puces par jeu : visibles seulement dans la catégorie Gaming ; elles pilotent le filtre de tag existant. */
+const gameChipClass = (active) =>
+  `shrink-0 h-7 rounded-full border px-3 text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
+    active ? 'border-sky-400 bg-sky-400/15 text-sky-200' : 'border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-white'
+  }`;
+
+function renderGameFilters() {
+  const box = $('#game-filters');
+  const show = state.category === 'Gaming';
+  box.classList.toggle('hidden', !show);
+  box.classList.toggle('flex', show);
+  if (!show) return void (box.innerHTML = '');
+  const gaming = allItems().filter((it) => it.category === 'Gaming');
+  const current = GAME_TAGS.has(state.tag) ? state.tag : '';
+  const chips = [['', 'Tous les jeux', gaming.length], ...GAME_CHIPS.map(([tag, label]) => [tag, label, gaming.filter((it) => it.tags.includes(tag)).length])];
+  box.innerHTML = chips
+    .map(
+      ([tag, label, n]) => `<button type="button" data-action="pick-game" data-tag="${tag}" aria-pressed="${current === tag}"
+        class="${gameChipClass(current === tag)}">${esc(label)} <span class="ml-0.5 font-mono text-[10px] opacity-60">${n}</span></button>`
+    )
+    .join('');
+}
+
+/** Compteur « Non lues » et état du bouton — sans re-rendre la liste. */
+function renderUnreadToggle() {
+  $('#unread-count').textContent = String(items.filter(isNew).length);
+  $('#unread-toggle').setAttribute('aria-pressed', String(state.unreadOnly));
+}
+
+const newBadge = (id) =>
+  `<span data-new="${esc(id)}" class="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-300 ring-1 ring-inset ring-sky-500/30">
+    <span class="h-1.5 w-1.5 rounded-full bg-sky-400" aria-hidden="true"></span>Nouveau</span>`;
+
 function renderActiveTag() {
-  $('#active-tag').innerHTML = state.tag
+  // Le tag d'un jeu est déjà matérialisé par sa puce (catégorie Gaming) : pas de doublon.
+  const shownByChip = state.category === 'Gaming' && GAME_TAGS.has(state.tag);
+  $('#active-tag').innerHTML = state.tag && !shownByChip
     ? `<button type="button" data-action="clear-tag" aria-label="Retirer le filtre tag ${esc(state.tag)}"
         class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 font-mono text-xs text-sky-300 hover:bg-sky-500/20">
         #${esc(state.tag)} <span aria-hidden="true">✕</span></button>`
@@ -275,6 +348,7 @@ function cardTemplate(it) {
   <article class="group relative flex flex-col rounded-xl border border-neutral-800 bg-neutral-950 p-5 transition hover:border-neutral-600 hover:bg-neutral-900/60">
     <div class="mb-3 flex items-start justify-between gap-3">
       <div class="flex flex-wrap items-center gap-2">
+        ${isNew(it) ? newBadge(it.id) : ''}
         ${statusBadge(it.status)}
         <span class="text-[11px] font-medium uppercase tracking-wider text-neutral-500">${esc(it.category)}</span>
       </div>
@@ -320,7 +394,7 @@ function kanbanCardTemplate(it, column) {
   };
   return `<article data-kanban-id="${esc(it.id)}" ${auth.isAdmin ? 'draggable="true"' : ''}
       class="rounded-lg border border-neutral-800 bg-neutral-900/70 p-3 ${auth.isAdmin ? 'cursor-grab active:cursor-grabbing' : ''}">
-    <p class="text-[11px] uppercase tracking-wider text-neutral-500">${esc(it.category)} · ${esc(formatDate(it.date))}</p>
+    <p class="text-[11px] uppercase tracking-wider text-neutral-500">${isNew(it) ? `<span data-new="${esc(it.id)}" class="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-sky-400 align-middle"><span class="sr-only">Nouveau</span></span>` : ''}${esc(it.category)} · ${esc(formatDate(it.date))}</p>
     <button type="button" data-action="open-detail" data-id="${esc(it.id)}" class="mt-1 text-left text-sm font-medium leading-snug text-white hover:underline">${esc(it.title)}</button>
     ${auth.isAdmin ? `<div class="mt-2 flex justify-end gap-1">${move(-1, '←')}${move(1, '→')}</div>` : ''}
   </article>`;
@@ -352,8 +426,10 @@ function setView(next) {
 
 function render() {
   renderCategoryFilters();
+  renderGameFilters();
   renderStatusFilters();
   renderActiveTag();
+  renderUnreadToggle();
   $('#favs-toggle').setAttribute('aria-pressed', String(state.favsOnly));
   $('#period').value = state.period;
   $('#sort').value = state.sort;
@@ -447,6 +523,7 @@ const addDialog = $('#add-dialog');
 const loginDialog = $('#login-dialog');
 const readerDialog = $('#reader-dialog');
 const digestDialog = $('#digest-dialog');
+const sourcesDialog = $('#sources-dialog');
 let digestMarkdown = '';
 let currentDetailId = null;
 let editingId = null;
@@ -537,9 +614,28 @@ function detailTemplate(it) {
   </div>`;
 }
 
+/** Marque une fiche comme lue ; retire son badge sur place (pas de re-rendu : focus et défilement intacts). */
+function markRead(id) {
+  if (readIds.has(id)) return;
+  readIds.add(id);
+  saveRead();
+  document.querySelectorAll('[data-new]').forEach((el) => el.dataset.new === id && el.remove());
+  renderUnreadToggle();
+}
+
+function markAllRead() {
+  const unread = items.filter(isNew);
+  if (!unread.length) return toast('Tout est déjà lu.');
+  unread.forEach((it) => readIds.add(it.id));
+  saveRead();
+  render();
+  toast(`${unread.length} fiche${unread.length > 1 ? 's' : ''} marquée${unread.length > 1 ? 's' : ''} comme lue${unread.length > 1 ? 's' : ''} ✓`);
+}
+
 function openDetail(id) {
   const it = findItem(id);
   if (!it) return;
+  markRead(id);
   currentDetailId = id;
   $('#detail-content').innerHTML = detailTemplate(it);
   if (!detailDialog.open) detailDialog.showModal();
@@ -597,6 +693,7 @@ async function openReader(id) {
     <div class="mt-6 space-y-4 border-t border-neutral-800 pt-6 text-[17px] leading-relaxed text-neutral-300">${renderContent(content)}</div>
     <p class="mt-8 border-t border-neutral-800 pt-4 text-xs text-neutral-500">Traduction automatique du flux de ${esc(it.source || 'la source')}.
       ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:text-sky-300">Lire l'article original ↗</a>` : ''}</p>`;
+  markRead(id);
   if (detailDialog.open) detailDialog.close();
   readerDialog.showModal();
   readerDialog.querySelector('.overflow-y-auto').scrollTop = 0;
@@ -686,6 +783,7 @@ async function handleAddSubmit(e) {
     if (!editingId) {
       $('#search').value = '';
       Object.assign(state, DEFAULT_FILTERS);
+      markRead(saved.id); // créée par l'admin : inutile de la signaler « Nouveau »
     }
     await loadItems();
     toast(editingId ? 'Ressource modifiée ✓' : 'Ressource ajoutée ✓');
@@ -764,6 +862,115 @@ function toggleFavorite(id) {
   render();
   refreshDetail();
   toast(added ? 'Ajouté aux favoris ★' : 'Retiré des favoris');
+}
+
+/* -------------------------------------------------------------------------- */
+/* 6b. Sources de veille (admin)                                              */
+/* -------------------------------------------------------------------------- */
+
+/** @type {{ id: string, url: string, host: string, category: string|null, enabled: boolean }[]} */
+let sources = [];
+
+function sourcesError(message) {
+  const box = $('#sources-error');
+  box.textContent = message ?? '';
+  box.classList.toggle('hidden', !message);
+}
+
+function renderSources() {
+  const active = sources.filter((s) => s.enabled).length;
+  $('#sources-count').textContent = `${active} active${active > 1 ? 's' : ''} sur ${sources.length}`;
+  $('#sources-list').innerHTML =
+    sources
+      .map(
+        (s) => `<li class="flex items-center gap-3 px-5 py-3">
+      <button type="button" role="switch" aria-checked="${s.enabled}" data-action="toggle-source" data-id="${esc(s.id)}"
+        aria-label="${s.enabled ? 'Mettre en pause' : 'Activer'} ${esc(s.host)}"
+        class="relative h-5 w-9 shrink-0 rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${s.enabled ? 'bg-emerald-500' : 'bg-neutral-700'}">
+        <span class="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition ${s.enabled ? 'translate-x-4' : ''}"></span>
+      </button>
+      <div class="min-w-0 flex-1">
+        <p class="truncate text-sm ${s.enabled ? 'text-white' : 'text-neutral-500'}">${esc(s.host)}</p>
+        <p class="truncate font-mono text-[11px] text-neutral-600" title="${esc(s.url)}">${esc(s.url)}</p>
+      </div>
+      ${s.category ? `<span class="shrink-0 rounded-full border border-neutral-800 px-2 py-0.5 text-[11px] text-neutral-400">${esc(s.category)}</span>` : ''}
+      <button type="button" data-action="delete-source" data-id="${esc(s.id)}" aria-label="Supprimer ${esc(s.host)}"
+        class="grid h-8 w-8 shrink-0 place-items-center rounded-md text-neutral-500 transition hover:bg-neutral-900 hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+        <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+      </button>
+    </li>`
+      )
+      .join('') || '<li class="px-5 py-8 text-center text-sm text-neutral-500">Aucune source : ajoutez un flux ci-dessous.</li>';
+}
+
+async function openSources() {
+  try {
+    sources = await api('/admin/sources');
+    $('#s-category').innerHTML =
+      '<option value="">Classement automatique</option>' + categories.map((c) => `<option value="${esc(c)}">Toujours : ${esc(c)}</option>`).join('');
+    sourcesError(null);
+    renderSources();
+    if (!sourcesDialog.open) sourcesDialog.showModal();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+/** Pause / reprise d'une source : mise à jour optimiste, annulée si l'API échoue. */
+async function toggleSource(id) {
+  const source = sources.find((s) => s.id === id);
+  if (!source) return;
+  const enabled = !source.enabled;
+  source.enabled = enabled;
+  renderSources();
+  try {
+    Object.assign(source, await api(`/admin/sources/${encodeURIComponent(id)}`, { method: 'PATCH', body: { enabled } }));
+    sourcesError(null);
+  } catch (err) {
+    source.enabled = !enabled;
+    sourcesError(err.message);
+  }
+  renderSources();
+}
+
+async function deleteSource(id) {
+  if (!sources.some((s) => s.id === id)) return;
+  try {
+    await api(`/admin/sources/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    sources = sources.filter((s) => s.id !== id);
+    sourcesError(null);
+    renderSources();
+  } catch (err) {
+    sourcesError(err.message);
+  }
+}
+
+/** Le serveur teste réellement le flux (lecture RSS) avant de l'enregistrer : l'erreur éventuelle s'affiche ici. */
+async function handleSourceSubmit(e) {
+  e.preventDefault();
+  const form = /** @type {HTMLFormElement} */ (e.currentTarget);
+  const url = form.elements.url.value.trim();
+  if (!safeUrl(url)) {
+    sourcesError("L'adresse du flux doit commencer par http:// ou https://.");
+    return form.elements.url.focus();
+  }
+  const submit = form.querySelector('[type="submit"]');
+  const label = submit.textContent;
+  submit.disabled = true;
+  submit.textContent = 'Test du flux…';
+  sourcesError(null);
+  try {
+    const added = await api('/admin/sources', { method: 'POST', body: { url, category: form.elements.category.value || null } });
+    sources.push(added);
+    renderSources();
+    form.elements.url.value = '';
+    $('#sources-list').scrollTop = $('#sources-list').scrollHeight;
+  } catch (err) {
+    sourcesError(err.message);
+  } finally {
+    submit.disabled = false;
+    submit.textContent = label;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -880,6 +1087,15 @@ const actions = {
   'make-offline': makeOffline,
   'open-reader': (el) => openReader(el.dataset.id),
   'open-digest': openDigest,
+  'open-sources': openSources,
+  'toggle-source': (el) => toggleSource(el.dataset.id),
+  'delete-source': (el) => deleteSource(el.dataset.id),
+  'mark-all-read': markAllRead,
+  'pick-game': (el) => {
+    const tag = el.dataset.tag || null;
+    // Clic sur la puce active (ou sur « Tous les jeux ») : on retire le filtre de jeu, sans toucher à un autre tag.
+    setState({ tag: tag && state.tag !== tag ? tag : GAME_TAGS.has(state.tag) ? null : state.tag });
+  },
   'copy-digest': async () => {
     try {
       await copyText(digestMarkdown);
@@ -948,7 +1164,12 @@ function bindEvents() {
     if (!target.closest('#menu, #btn-menu')) setMenu(false);
 
     const filterBtn = target.closest('[data-filter]');
-    if (filterBtn) return setState({ [filterBtn.dataset.filter]: filterBtn.dataset.value });
+    if (filterBtn) {
+      const patch = { [filterBtn.dataset.filter]: filterBtn.dataset.value };
+      // Quitter Gaming : un filtre de jeu actif viderait la liste, on le retire.
+      if (patch.category && patch.category !== 'Gaming' && GAME_TAGS.has(state.tag)) patch.tag = null;
+      return setState(patch);
+    }
 
     const actionEl = target.closest('[data-action]');
     if (!actionEl) return;
@@ -970,6 +1191,7 @@ function bindEvents() {
   });
 
   $('#favs-toggle').addEventListener('click', () => setState({ favsOnly: !state.favsOnly }));
+  $('#unread-toggle').addEventListener('click', () => setState({ unreadOnly: !state.unreadOnly }));
   $('#btn-reset').addEventListener('click', () => {
     $('#search').value = '';
     setState({ ...DEFAULT_FILTERS, sort: 'desc' });
@@ -990,14 +1212,19 @@ function bindEvents() {
   $('#period').addEventListener('change', (e) => setState({ period: e.target.value }));
   $('#sort').addEventListener('change', (e) => setState({ sort: e.target.value }));
 
-  for (const dialog of [detailDialog, addDialog, loginDialog, readerDialog, digestDialog]) {
+  for (const dialog of [detailDialog, addDialog, loginDialog, readerDialog, digestDialog, sourcesDialog]) {
     dialog.addEventListener('click', (e) => {
       if (e.target === dialog) dialog.close();
     });
   }
-  detailDialog.addEventListener('close', () => (currentDetailId = null));
+  detailDialog.addEventListener('close', () => {
+    currentDetailId = null;
+    if (state.unreadOnly) render(); // la fiche qu'on vient de lire sort de la liste « Non lues »
+  });
+  readerDialog.addEventListener('close', () => state.unreadOnly && render());
 
   $('#add-form').addEventListener('submit', handleAddSubmit);
+  $('#sources-form').addEventListener('submit', handleSourceSubmit);
   $('#login-form').addEventListener('submit', handleLogin);
 
   $('#import-input').addEventListener('change', (e) => {
@@ -1009,6 +1236,11 @@ function bindEvents() {
   // Synchronisation entre onglets (IndexedDB n'émet pas d'événement « storage »)
   channel?.addEventListener('message', async ({ data }) => {
     if (data === 'token') return setAdmin(await store.get('token', null), false);
+    if (data === 'read') {
+      readIds.clear();
+      (await store.get('read', [])).forEach((id) => readIds.add(id));
+      return render();
+    }
     if (data !== 'favs') return;
     favorites.clear();
     (await store.get('favs', [])).forEach((id) => favorites.add(id));

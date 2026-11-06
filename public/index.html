@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>TechVeille Hub</title>
-  <meta name="description" content="Veille technologique front-end : standards web, CSS, design, méthodologies et outils." />
+  <title>TechVeille Hub — Veille tech &amp; gaming</title>
+  <meta name="description" content="Veille tech et gaming : standards web, CSS, design, IA, outils et actualités jeux vidéo." />
 
   <!-- PWA -->
   <link rel="manifest" href="./manifest.json" />
@@ -96,8 +96,10 @@
             <button type="button" role="menuitem" data-action="export-json" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Exporter les données (JSON)</button>
             <button type="button" role="menuitem" data-admin data-action="import-json" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Importer un fichier JSON…</button>
             <button type="button" role="menuitem" data-action="make-offline" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Rendre disponible hors-ligne</button>
+            <button type="button" role="menuitem" data-action="mark-all-read" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Tout marquer comme lu</button>
             <button type="button" role="menuitem" data-action="export-md" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Exporter la sélection (Markdown)</button>
             <button type="button" role="menuitem" data-admin data-action="open-digest" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Générer le digest hebdo</button>
+            <button type="button" role="menuitem" data-admin data-action="open-sources" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Gérer les sources de veille</button>
             <button type="button" role="menuitem" data-admin data-action="logout" class="w-full rounded-md px-3 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-900 hover:text-white focus:bg-neutral-900 focus:outline-none">Se déconnecter</button>
           </div>
         </div>
@@ -113,8 +115,8 @@
   <main class="relative mx-auto max-w-6xl px-4 pb-28 pt-8 sm:pt-12">
     <!-- Hero -->
     <section class="mb-8">
-      <h1 class="text-3xl font-semibold tracking-tight text-white sm:text-5xl">Veille front-end,<br class="sm:hidden" /> <span class="bg-gradient-to-r from-neutral-200 to-neutral-500 bg-clip-text text-transparent">sans le bruit.</span></h1>
-      <p class="mt-3 max-w-xl text-sm text-neutral-400 sm:text-base">Standards web, CSS, design, méthodologies et outils : les nouveautés qui comptent, avec démo de code et export Markdown.</p>
+      <h1 class="text-3xl font-semibold tracking-tight text-white sm:text-5xl">Veille tech &amp; gaming,<br class="sm:hidden" /> <span class="bg-gradient-to-r from-neutral-200 to-neutral-500 bg-clip-text text-transparent">sans le bruit.</span></h1>
+      <p class="mt-3 max-w-xl text-sm text-neutral-400 sm:text-base">Web, CSS, design, IA, outils… et jeux vidéo : les nouveautés qui comptent, avec démo de code et export Markdown.</p>
     </section>
 
     <!-- Filters -->
@@ -128,12 +130,18 @@
       </div>
 
       <div id="category-filters" role="group" aria-label="Catégorie" class="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4"></div>
+      <div id="game-filters" role="group" aria-label="Jeu" class="no-scrollbar -mx-4 hidden gap-2 overflow-x-auto px-4"></div>
 
       <div class="flex flex-wrap items-center gap-2">
         <div id="status-filters" role="group" aria-label="Statut" class="no-scrollbar inline-flex max-w-full overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-950 p-0.5"></div>
         <button id="favs-toggle" type="button" aria-pressed="false"
           class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-neutral-800 px-3 text-sm text-neutral-400 transition hover:text-white aria-pressed:border-amber-500/40 aria-pressed:bg-amber-500/10 aria-pressed:text-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
           <span aria-hidden="true">★</span> Favoris
+        </button>
+        <button id="unread-toggle" type="button" aria-pressed="false"
+          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-neutral-800 px-3 text-sm text-neutral-400 transition hover:text-white aria-pressed:border-sky-500/40 aria-pressed:bg-sky-500/10 aria-pressed:text-sky-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+          <span aria-hidden="true" class="h-1.5 w-1.5 rounded-full bg-sky-400"></span> Non lues
+          <span id="unread-count" class="font-mono text-[11px] opacity-70">0</span>
         </button>
         <label for="period" class="sr-only">Période</label>
         <select id="period" class="h-8 rounded-lg border border-neutral-800 bg-neutral-950 px-2 text-sm text-neutral-300 transition hover:border-neutral-600 focus:border-neutral-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"></select>
@@ -220,6 +228,35 @@
         <button type="button" data-action="download-digest" class="h-9 rounded-md border border-neutral-800 px-4 text-sm text-neutral-300 hover:border-neutral-600 hover:text-white">Télécharger .md</button>
         <button type="button" data-action="copy-digest" class="h-9 rounded-md bg-white px-4 text-sm font-medium text-black hover:bg-neutral-200">Copier le Markdown</button>
       </div>
+    </div>
+  </dialog>
+
+  <!-- Sources de veille (admin) -->
+  <dialog id="sources-dialog" aria-labelledby="sources-title"
+    class="m-0 mt-auto max-h-[92dvh] w-full max-w-none overflow-hidden rounded-t-2xl border border-neutral-800 bg-neutral-950 p-0 text-neutral-200 sm:m-auto sm:max-w-2xl sm:rounded-2xl">
+    <div class="flex max-h-[92dvh] flex-col">
+      <div class="flex items-center justify-between border-b border-neutral-800 px-5 py-4">
+        <div>
+          <h2 id="sources-title" class="font-semibold text-white">Sources de veille</h2>
+          <p id="sources-count" class="text-xs text-neutral-500"></p>
+        </div>
+        <button type="button" data-action="close-dialog" aria-label="Fermer" class="grid h-8 w-8 place-items-center rounded-md text-neutral-400 hover:bg-neutral-900 hover:text-white">
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <ul id="sources-list" class="flex-1 divide-y divide-neutral-900 overflow-y-auto"></ul>
+      <form id="sources-form" novalidate class="space-y-3 border-t border-neutral-800 px-5 py-4" style="padding-bottom: max(1rem, env(safe-area-inset-bottom))">
+        <p class="text-xs font-medium text-neutral-400">Ajouter un flux RSS / Atom</p>
+        <div class="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+          <label for="s-url" class="sr-only">URL du flux</label>
+          <input id="s-url" name="url" type="url" inputmode="url" required autocomplete="off" spellcheck="false" placeholder="https://site.com/feed" class="field" />
+          <label for="s-category" class="sr-only">Catégorie</label>
+          <select id="s-category" name="category" class="field sm:!w-auto"></select>
+          <button type="submit" class="h-10 whitespace-nowrap rounded-md bg-white px-4 text-sm font-medium text-black hover:bg-neutral-200 disabled:cursor-wait disabled:opacity-60">Tester et ajouter</button>
+        </div>
+        <p id="sources-error" role="alert" class="hidden rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"></p>
+        <p class="text-xs text-neutral-600">Le flux est testé avant d'être enregistré ; ses articles arrivent à la prochaine veille. Une catégorie imposée classe tous ses articles d'office.</p>
+      </form>
     </div>
   </dialog>
 

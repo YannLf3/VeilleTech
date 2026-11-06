@@ -8,19 +8,20 @@
  *  - App shell (même origine) : network-first, repli sur le cache hors-ligne. HTML et JS viennent ainsi
  *                               toujours de la même version (le stale-while-revalidate servait un ancien
  *                               app.js avec un nouvel index.html après chaque mise à jour).
- *  - CDN (Tailwind, polices)  : stale-while-revalidate dans un cache runtime.
+ *  - CDN (polices Google)     : stale-while-revalidate dans un cache runtime.
  *
  * Incrémenter VERSION à chaque déploiement pour invalider l'ancien cache.
  */
 importScripts('./db.js'); // TVHDB (IndexedDB), partagé avec la page
 
-const VERSION = 'v6.0.1';
+const VERSION = 'v6.0.2';
 const SHELL_CACHE = `tvh-shell-${VERSION}`;
 const RUNTIME_CACHE = `tvh-runtime-${VERSION}`;
 
 const APP_SHELL = [
   './',
   './index.html',
+  './tailwind.css',
   './app.js',
   './db.js',
   './search.js',
@@ -34,20 +35,13 @@ const APP_SHELL = [
   './icons/apple-touch-icon.png',
 ];
 
-const CDN_HOSTS = ['cdn.tailwindcss.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
+const CDN_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(SHELL_CACHE);
       await cache.addAll(APP_SHELL);
-      // Pré-cache best-effort de Tailwind : l'app reste stylée dès la 1re visite hors-ligne.
-      try {
-        const res = await fetch('https://cdn.tailwindcss.com', { mode: 'no-cors' });
-        await (await caches.open(RUNTIME_CACHE)).put('https://cdn.tailwindcss.com/', res);
-      } catch {
-        /* réseau indisponible : sera mis en cache au prochain chargement */
-      }
       await self.skipWaiting();
     })()
   );

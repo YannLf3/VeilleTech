@@ -2,7 +2,7 @@
  * TechVeille Hub — serveur Express.
  *  - API publique en lecture seule (GET), routes d'écriture protégées par JWT.
  *  - Stockage : data.json (écriture atomique), initialisé depuis data.seed.json.
- *  - Veille automatisée (cron hebdo) et manuelle (POST /api/force-fetch) via rss-parser.
+ *  - Veille automatisée (cron quotidien) et manuelle (POST /api/force-fetch) via rss-parser.
  *
  * Générer le hash du mot de passe admin : npm run hash-password -- 'mon-mot-de-passe'
  */
@@ -29,7 +29,8 @@ const {
   JWT_SECRET,
   ADMIN_USERNAME = 'admin',
   ADMIN_PASSWORD_HASH,
-  CRON_SCHEDULE = '0 8 * * 1', // lundi 8h
+  CRON_SCHEDULE = '0 8 * * *', // tous les jours à 8h
+  RETENTION_DAYS = '90', // fiches « auto » jamais retravaillées supprimées après N jours (0 = jamais)
   CRON_TZ = 'Europe/Paris',
   FEED_URLS = [
     'https://developer.chrome.com/blog/feed.xml',
@@ -179,7 +180,10 @@ async function fetchVeille() {
       const url = safeUrl(e.link);
       if (!url || known.has(url)) continue;
       known.add(url);
-      candidates.push({ ...veille.fromFeedItem(e, r.value.url, isGaming ? 'Gaming' : null), url });
+      const candidate = veille.fromFeedItem(e, r.value.url, isGaming ? 'Gaming' : null);
+      // Déjà hors rétention : l'ingérer serait inutile (il serait purgé aussitôt, puis retraduit à chaque passage).
+      if (veille.isExpired(candidate.date, Number(RETENTION_DAYS))) continue;
+      candidates.push({ ...candidate, url });
     }
   }
   const fresh = [];
@@ -195,16 +199,16 @@ async function fetchVeille() {
       console.warn('[veille] traduction échouée, article reporté :', c.url, err.message);
     }
   }
+  // Rétention : on retire les vieilles fiches « auto » non retravaillées (le fichier ne grossit pas indéfiniment).
+  const { kept, removed } = veille.purgeOld([...fresh, ...current], Number(RETENTION_DAYS));
   // Sauvegarde directe, sans vérification de version (forceOverwrite) : pas d'erreur CONFLICT possible.
-  let added = 0;
-  if (fresh.length) {
-    const merged = [...fresh, ...current];
-    await store.save(merged, { forceOverwrite: true });
-    items = merged;
-    added = fresh.length;
+  if (fresh.length || removed.length) {
+    await store.save(kept, { forceOverwrite: true });
+    items = kept;
   }
   return {
-    added,
+    added: fresh.length,
+    purged: removed.length,
     rejected: candidates.length - fresh.length - untranslated,
     untranslated,
     failedFeeds: results.filter((r) => r.status === 'rejected').length,

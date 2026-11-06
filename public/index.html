@@ -21,21 +21,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
-  <!-- Tailwind CSS (CDN) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-            mono: ['"Geist Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
-          },
-        },
-      },
-    };
-  </script>
+  <!-- Tailwind CSS compilé (npm run build:css → public/tailwind.css) -->
+  <link rel="stylesheet" href="./tailwind.css" />
 
   <style>
     :root { color-scheme: dark; }
@@ -319,14 +306,6 @@
   <div id="toast" role="status" aria-live="polite"
     class="pointer-events-none fixed inset-x-0 bottom-24 z-50 mx-auto w-fit translate-y-2 rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-2.5 text-sm text-white opacity-0 shadow-xl transition duration-200 sm:bottom-8"></div>
 
-  <script type="text/tailwindcss">
-    @layer components {
-      .field {
-        @apply block w-full rounded-md border border-neutral-800 bg-black px-3 py-2 text-sm text-white placeholder:text-neutral-600 transition focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/10;
-      }
-      .field:is(input, select) { @apply h-10; }
-    }
-  </script>
   <script src="./db.js"></script>
   <script type="module" src="./app.js"></script>
 </body>

@@ -4,7 +4,7 @@
  * Partagé par server.js (scraping) et scripts/clean-data.js (nettoyage ponctuel).
  * Traduction : moteur Google du paquet `translate` (sans clé, non officiel → peut être limité en débit).
  */
-const CATEGORIES = ['Standards Web', 'CSS', 'Design', 'Méthodologies', 'Outils', 'Intelligence Artificielle', 'Écosystème / Frameworks'];
+const CATEGORIES = ['Standards Web', 'CSS', 'Design', 'Méthodologies', 'Outils', 'Intelligence Artificielle', 'Écosystème / Frameworks', 'Gaming'];
 
 const TAG_ALIASES = {
   tailwindcss: 'tailwind', js: 'javascript', reactjs: 'react', reactnative: 'react-native', ts: 'typescript', nodejs: 'node',
@@ -19,7 +19,9 @@ const NOISE_TAGS = new Set(['webdev', 'programming', 'beginners', 'tutorial', 'd
 const TRUSTED_HOSTS = new Set(['developer.chrome.com', 'webkit.org', 'developer.mozilla.org', 'tailwindcss.com', 'smashingmagazine.com', 'openai.com', 'huggingface.co']);
 // Anti-spam (titre + résumé, langue source) : contenu promotionnel ou campagnes sponsorisées.
 const SPAM_KEYWORDS = [/\bhindsight\b/i, /\bsponsor(ed|ship|s)?\b/i, /(?<!\bof )\bcourses?\b/i, /\b(promo|coupon|discount) codes?\b/i,
-  /\baffiliate\b/i, /\b(bootcamp|masterclass)\b/i, /\bgiveaway\b/i, /\blimited[- ]time offer\b/i, /\bpartner content\b/i];
+  /\baffiliate\b/i, /\b(bootcamp|masterclass)\b/i, /\bgiveaway\b/i, /\blimited[- ]time offer\b/i, /\bpartner content\b/i,
+  // Bons plans (très fréquents sur les sites gaming) ; motifs ciblés pour ne pas toucher « deal with ».
+  /\b(best|top|today'?s|early|huge|biggest)\b[\w' ]{0,25}\bdeals?\b/i, /\b(prime day|black friday|cyber monday)\b/i, /\b\d+% off\b/i];
 const isSpam = (text) => SPAM_KEYWORDS.some((re) => re.test(text));
 const OFF_TOPIC_TAGS = new Set(['career', 'blockchain', 'web3', 'crypto', 'gaming', 'hiring', 'jobs']);
 const LOW_QUALITY_TITLES = [/\bI (built|made|created)\b/i, /\bfree\b.*\btemplates?\b/i, /analogy|for (absolute )?beginners|explained (simply|like)/i,
@@ -39,6 +41,11 @@ const CATEGORY_KEYWORDS = {
     'open[- ]?source', 'licen[cs]e', 'vercel', 'netlify', 'shopify', 'cloudflare', 'state of', 'survey'],
   Outils: ['tailwind(css)?', 'vite', 'webpack', 'turbopack', 'rollup', 'esbuild', 'npm', 'pnpm', 'yarn', 'postcss', 'eslint', 'prettier', 'biome',
     'git(hub)?', 'devtools', 'vs ?code', 'cli'],
+  // Dernier = priorité la plus basse en cas d'égalité. Noms propres précis pour éviter les faux positifs (« game changer »…).
+  // Les flux de la liste GAMING_FEED_URLS (server.js) sont classés Gaming d'office, sans passer par ces mots-clés.
+  Gaming: ['gaming', 'gamers?', 'video games?', 'jeux? vid[eé]o', 'esports?', 'call of duty', 'warzone', 'valorant', 'fortnite', 'minecraft',
+    'roblox', 'league of legends', 'apex legends', 'counter-strike', 'cs2', 'gta( ?(v|vi|6))?', 'playstation', 'ps[45]', 'xbox', 'nintendo',
+    'switch 2', 'steam deck', 'zelda', 'pok[eé]mon', 'elden ring', 'game pass'],
 };
 const KEYWORD_RES = Object.entries(CATEGORY_KEYWORDS).map(([cat, kws]) => [cat, kws.map((k) => new RegExp(`(^|[^a-z])(${k})([^a-z]|$)`))]);
 
@@ -102,11 +109,12 @@ function categorize(title, tags, summary = '') {
 }
 
 /** Rejette hors-périmètre ; pour les sources non officielles, aussi le promotionnel, le trop court ou sans vrai résumé. */
-function isRelevant({ title, summary, tags, trusted = false }) {
+function isRelevant({ title, summary, tags, trusted = false, forcedCategory = null }) {
   const t = clean(title);
   const s = clean(summary);
   if (isSpam(`${t} ${s}`)) return false;
-  if (trusted) return t.length > 0 && s.length > 0 && categorize(t, tags, s) !== null;
+  // forcedCategory : flux dédié à une catégorie (ex. Gaming) → le périmètre est garanti par la source.
+  if (trusted) return t.length > 0 && s.length > 0 && (forcedCategory !== null || categorize(t, tags, s) !== null);
   return (
     t.split(' ').length >= 4 &&
     s.length >= 80 &&
@@ -205,7 +213,7 @@ async function translateLong(text, from) {
 /** Entrée rss-parser (RSS/Atom) → candidat brut (texte nettoyé, non traduit). */
 const BOILERPLATE = /\s*(The post .{1,300}? appeared first on [^.\n]+\.?|Continue reading.*$|Read more.*$)\s*$/is; // pieds de flux WordPress & co.
 
-function fromFeedItem(e, feedUrl) {
+function fromFeedItem(e, feedUrl, forcedCategory = null) {
   const text = htmlToText(e['content:encoded'] || e.content || e.summary || '').replace(BOILERPLATE, '');
   const summary = clean(e.contentSnippet).replace(BOILERPLATE, '') || clean(text);
   return {
@@ -214,7 +222,9 @@ function fromFeedItem(e, feedUrl) {
     content: text.length >= Math.max(CONTENT_MIN, summary.length + 200) ? truncate(text, CONTENT_MAX) : '',
     tags: [feedUrl.match(/dev\.to\/feed\/tag\/([\w-]+)/)?.[1], ...(e.categories ?? []).map((c) => (typeof c === 'string' ? c : c?._))].filter(Boolean),
     source: new URL(feedUrl).hostname.replace(/^www\./, ''),
-    trusted: TRUSTED_HOSTS.has(new URL(feedUrl).hostname.replace(/^www\./, '')),
+    // Flux à catégorie imposée = liste choisie par l'admin → traité comme source de confiance (pas de filtre qualité textuel).
+    trusted: forcedCategory !== null || TRUSTED_HOSTS.has(new URL(feedUrl).hostname.replace(/^www\./, '')),
+    forcedCategory,
     url: e.link,
     date: e.isoDate?.slice(0, 10),
   };
@@ -233,7 +243,7 @@ async function toFiche(raw) {
     title: shorten(t.trim().charAt(0).toUpperCase() + t.trim().slice(1), 120),
     summary: rest.join(' ').trim(),
     content: raw.content ? await translateLong(raw.content, from) : '',
-    category: categorize(raw.title, tags, raw.summary) ?? 'Outils',
+    category: raw.forcedCategory ?? categorize(raw.title, tags, raw.summary) ?? 'Outils',
     status: 'experimental',
     tags: ['auto', ...harmonizeTags(tags)],
   };

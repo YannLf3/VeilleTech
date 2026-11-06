@@ -14,7 +14,7 @@
  */
 importScripts('./db.js'); // TVHDB (IndexedDB), partagé avec la page
 
-const VERSION = 'v6.0.0';
+const VERSION = 'v6.0.1';
 const SHELL_CACHE = `tvh-shell-${VERSION}`;
 const RUNTIME_CACHE = `tvh-runtime-${VERSION}`;
 

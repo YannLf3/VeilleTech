@@ -45,6 +45,16 @@ const {
     ...['html', 'css', 'javascript', 'tailwindcss', 'opensource'].map((t) => `https://dev.to/feed/tag/${t}`),
   ].join(','),
   FEED_LIMIT = '5',
+  // Flux gaming : liste séparée de FEED_URLS (toujours active même si FEED_URLS est défini sur Vercel).
+  // Leurs articles sont classés « Gaming » d'office. Limite plus basse : moins de traductions par passage (durée de la fonction).
+  GAMING_FEED_URLS = [
+    'https://www.pcgamer.com/rss/',
+    'https://www.gamespot.com/feeds/news/',
+    'https://www.minecraft.net/en-us/feeds/community-content/rss',
+    'https://news.xbox.com/en-us/feed/',
+    'https://blog.playstation.com/feed/',
+  ].join(','),
+  GAMING_FEED_LIMIT = '3',
   CORS_ORIGIN,
   TRUST_PROXY,
   CRON_SECRET,
@@ -141,7 +151,9 @@ const validId = (id) => (typeof id === 'string' && /^[\w-]{1,80}$/.test(id) ? id
 /* ------------------------------ Veille (RSS) ------------------------------- */
 
 const parser = new Parser({ timeout: 10_000 });
-const FEEDS = FEED_URLS.split(',').map((u) => safeUrl(u.trim())).filter(Boolean);
+const parseFeeds = (list) => list.split(',').map((u) => safeUrl(u.trim())).filter(Boolean);
+const GAMING_FEEDS = new Set(parseFeeds(GAMING_FEED_URLS));
+const FEEDS = [...new Set([...parseFeeds(FEED_URLS), ...GAMING_FEEDS])]; // Set : pas de flux en double
 let running = null;
 
 /**
@@ -161,11 +173,13 @@ async function fetchVeille() {
       console.warn('[veille] flux en échec :', r.reason?.message);
       continue;
     }
-    for (const e of r.value.feed.items.slice(0, Number(FEED_LIMIT))) {
+    const isGaming = GAMING_FEEDS.has(r.value.url);
+    const limit = Number(isGaming ? GAMING_FEED_LIMIT : FEED_LIMIT);
+    for (const e of r.value.feed.items.slice(0, limit)) {
       const url = safeUrl(e.link);
       if (!url || known.has(url)) continue;
       known.add(url);
-      candidates.push({ ...veille.fromFeedItem(e, r.value.url), url });
+      candidates.push({ ...veille.fromFeedItem(e, r.value.url, isGaming ? 'Gaming' : null), url });
     }
   }
   const fresh = [];

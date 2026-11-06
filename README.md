@@ -387,7 +387,7 @@ Chaque fiche de `data/data.json` a cette forme :
 | `experimental` | 🧪 Expérimental | À tester |
 | `recommended` | ✅ Recommandé | Prêt pour Prod |
 
-**Catégories** : Standards Web, CSS, Design, Méthodologies, Outils, Intelligence Artificielle, Écosystème / Frameworks.
+**Catégories** : Standards Web, CSS, Design, Méthodologies, Outils, Intelligence Artificielle, Écosystème / Frameworks, Gaming (actualités jeux vidéo : Call of Duty, Valorant, Fortnite, Minecraft…).
 
 **Tag `auto`** : présent sur toutes les fiches issues de la veille automatique.
 

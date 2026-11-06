@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "hash-password": "node server.js hash"
+    "hash-password": "node server.js hash",
+    "build:css": "tailwindcss -i ./src/tailwind.css -o ./public/tailwind.css --minify",
+    "watch:css": "tailwindcss -i ./src/tailwind.css -o ./public/tailwind.css --watch"
   },
   "keywords": [],
   "author": "",
@@ -25,5 +27,8 @@
   },
   "engines": {
     "node": ">=20.12"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.19"
   }
 }

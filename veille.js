@@ -249,6 +249,20 @@ async function toFiche(raw) {
   };
 }
 
+/**
+ * Rétention : sépare les fiches à supprimer (`removed`) de celles à garder (`kept`).
+ * Seules sont supprimées les fiches issues de la veille (tag « auto ») jamais retravaillées (statut « experimental »,
+ * c'est-à-dire pas déplacées dans le Kanban) et plus vieilles que `days` jours. Les fiches manuelles, celles sans date
+ * valide et celles que l'admin a fait évoluer sont toujours conservées. `days` ≤ 0 désactive la purge.
+ */
+function purgeOld(items, days, now = Date.now()) {
+  const stale = (it) => it.tags?.includes('auto') && it.status === 'experimental' && isExpired(it.date, days, now);
+  return { kept: items.filter((it) => !stale(it)), removed: items.filter(stale) };
+}
+
+/** Date (AAAA-MM-JJ) hors de la fenêtre de rétention ? Faux si `days` ≤ 0 ou date absente/invalide. */
+const isExpired = (date, days, now = Date.now()) => days > 0 && Date.parse(date) < now - days * 86_400_000;
+
 /** Doublon si le titre partage ≥ 60 % de ses mots significatifs avec une fiche existante (ex. article traduit republié). */
 function isDuplicate(title, items) {
   const words = (s) => new Set(norm(s).split(/[^a-z0-9]+/).filter((w) => w.length > 3));
@@ -263,4 +277,4 @@ function isDuplicate(title, items) {
 /** Trie les sources anglaises en premier : meilleure traduction conservée en cas de doublon. */
 const bySourceLang = (a, b) => (detectLang(`${b.title} ${b.summary}`) === 'en') - (detectLang(`${a.title} ${a.summary}`) === 'en');
 
-module.exports = { CATEGORIES, fromFeedItem, isRelevant, toFiche, isDuplicate, harmonizeTags, categorize, bySourceLang, detectLang, htmlToText };
+module.exports = { CATEGORIES, fromFeedItem, isRelevant, toFiche, isDuplicate, purgeOld, isExpired, harmonizeTags, categorize, bySourceLang, detectLang, htmlToText };

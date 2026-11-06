@@ -72,7 +72,7 @@ L'objectif n'était donc pas de livrer un produit commercial, mais d'**évaluer 
 |---|---|
 | **CRUD des fiches** | Ajouter, modifier, supprimer une fiche via un formulaire. |
 | **Kanban interactif** | Glisser-déposer une fiche d'une colonne à l'autre (ou flèches ← → au clavier/tactile) pour changer son statut. |
-| **Lancer la veille web** | Déclenche immédiatement la récupération des flux RSS (sinon automatique chaque lundi 8 h). |
+| **Lancer la veille web** | Déclenche immédiatement la récupération des flux RSS (sinon automatique chaque jour à 8 h). |
 | **Digest hebdomadaire** | Génère un récapitulatif Markdown des fiches des 7 derniers jours, prêt à copier pour un partage rapide. |
 | **Import JSON** | Import en masse de fiches depuis un fichier JSON. |
 
@@ -82,7 +82,7 @@ L'objectif n'était donc pas de livrer un produit commercial, mais d'**évaluer 
 
 | Couche | Technologies | Pourquoi |
 |---|---|---|
-| **Front-end** | HTML5 sémantique, **Tailwind CSS (CDN)**, **JavaScript vanilla en ESModules** | Aucun framework ni étape de build : l'application est légère et directement lisible. |
+| **Front-end** | HTML5 sémantique, **Tailwind CSS v3 compilé** (`public/tailwind.css`), **JavaScript vanilla en ESModules** | Aucun framework JS ; seul le CSS est compilé (`npm run build:css`) et le résultat est versionné : l'application est légère et directement lisible. |
 | **Back-end** | **Node.js ≥ 20.12**, **Express 5** (CommonJS) | Serveur minimal qui sert à la fois l'API et les fichiers statiques. |
 | **Stockage serveur** | Fichier **JSON** (`data/data.json`, écriture atomique) ou **Vercel Blob** privé sur Vercel (`storage.js`) | Pas de base de données à installer ; suffisant pour quelques milliers de fiches. |
 | **Stockage client** | **IndexedDB** | Plus de capacité que `localStorage`, accessible au service worker. |
@@ -181,7 +181,8 @@ Toutes les variables sont lues par `server.js` (via `dotenv`). Le fichier `.env`
 | `JWT_SECRET` | **oui** | — | Secret de signature des jetons (≥ 32 caractères). |
 | `ADMIN_USERNAME` | non | `admin` | Identifiant de l'administrateur unique (à personnaliser). |
 | `ADMIN_PASSWORD_HASH` | **oui** | — | Hash bcrypt du mot de passe (`npm run hash-password`). |
-| `CRON_SCHEDULE` | non | `0 8 * * 1` | Planification de la veille (syntaxe cron ; défaut : lundi 8 h). |
+| `CRON_SCHEDULE` | non | `0 8 * * *` | Planification de la veille (syntaxe cron ; défaut : tous les jours à 8 h). |
+| `RETENTION_DAYS` | non | `90` | Les fiches issues de la veille (tag `auto`), jamais retravaillées (statut resté `experimental`), sont supprimées après N jours ; `0` désactive la purge. Les fiches manuelles ou déplacées dans le Kanban sont conservées. Les favoris (stockés dans le navigateur) d'une fiche purgée disparaissent de l'affichage. |
 | `CRON_TZ` | non | `Europe/Paris` | Fuseau horaire du cron. |
 | `FEED_URLS` | non | 15 flux (voir §10) | Liste des flux RSS/Atom, séparés par des virgules. |
 | `FEED_LIMIT` | non | `5` | Nombre d'articles lus par flux à chaque passage. |
@@ -212,7 +213,7 @@ Toutes les variables sont lues par `server.js` (via `dotenv`). Le fichier `.env`
 │  server.js (Express 5)                                                  │
 │   ├── /api/*          API REST (lecture publique, écriture JWT)         │
 │   ├── fichiers statiques de public/                                     │
-│   ├── node-cron       veille planifiée (lundi 8 h)                      │
+│   ├── node-cron       veille planifiée (quotidienne, 8 h)              │
 │   └── storage.js      data/data.json (local, Docker) ou Vercel Blob     │
 │                                                                         │
 │  veille.js  pipeline : RSS → filtres → traduction FR → catégorie → tags │
@@ -246,7 +247,7 @@ VeilleTech/
 ├── .env.example              # Modèle de configuration (à copier en .env)
 ├── Dockerfile                # Image de production
 ├── docker-compose.yml        # Orchestration Docker (port 3000, volume ./data)
-├── vercel.json               # Déploiement Vercel : Cron Job hebdomadaire → /api/cron
+├── vercel.json               # Déploiement Vercel : Cron Job quotidien → /api/cron
 ├── .dockerignore             # Fichiers exclus de l'image Docker
 ├── .gitignore                # Fichiers exclus de Git (.env, data/, node_modules…)
 ├── CLAUDE.md                 # Mémo technique destiné à Claude Code
@@ -306,7 +307,7 @@ Détails dans la [section 10](#10-le-pipeline-de-veille-automatisée).
 
 ### 6.3 `public/index.html` — la structure
 
-- **`<head>`** : métadonnées PWA (manifest, `theme-color`, icônes Apple), polices Geist (Google Fonts), Tailwind CDN et sa configuration, quelques styles de base (grille de fond, animations des modales, respect de `prefers-reduced-motion`).
+- **`<head>`** : métadonnées PWA (manifest, `theme-color`, icônes Apple), polices Geist (Google Fonts), feuille `tailwind.css` compilée, quelques styles de base (grille de fond, animations des modales, respect de `prefers-reduced-motion`).
 - **Règle CSS clé** : `body:not(.is-admin) [data-admin]` et `body.is-admin [data-guest]` sont masqués. Il suffit donc d'ajouter l'attribut `data-admin` à un élément pour le réserver à l'administrateur.
 - **Header** : logo, badge *Admin*, bascule Liste/Kanban, bouton de veille (admin), cadenas de connexion (visiteur), menu **⋯** (exports, import, hors-ligne, digest, déconnexion), bouton *Ajouter*.
 - **Zone de filtres** : recherche, catégories (générées dynamiquement), statuts, favoris, période, tri.
@@ -441,7 +442,7 @@ curl -X POST http://localhost:3000/api/force-fetch -H "Authorization: Bearer $TO
 
 ### Déclenchement
 
-- **Automatique** : `node-cron`, par défaut chaque **lundi à 8 h** (heure de Paris) en local et sous Docker ; sur Vercel, Cron Job de `vercel.json` → `GET /api/cron` (voir §14).
+- **Automatique** : `node-cron`, par défaut **chaque jour à 8 h** (heure de Paris) en local et sous Docker ; sur Vercel, Cron Job de `vercel.json` → `GET /api/cron` (voir §14).
 - **Manuel** : bouton « Lancer la veille web » (admin) → `POST /api/force-fetch`, avec indicateur de chargement.
 
 ### Sources par défaut (`FEED_URLS`)
@@ -523,7 +524,7 @@ Pas de DOM virtuel : `render()` régénère les zones concernées via des templa
 ### Stratégies du service worker (`sw.js`)
 
 - **Fichiers de l'app (même origine)** : *network-first* — le réseau d'abord, le cache seulement hors-ligne. Ainsi, la page et son JavaScript viennent **toujours de la même version**. (Une première version en *stale-while-revalidate* servait parfois un ancien `app.js` avec un nouvel `index.html` après une mise à jour, ce qui rendait inactifs les nouveaux boutons.)
-- **CDN (Tailwind, Google Fonts)** : *stale-while-revalidate*.
+- **CDN (Google Fonts)** : *stale-while-revalidate* ; `tailwind.css` fait partie de l'app shell.
 - **Routes `/api`** : jamais interceptées ; les données hors-ligne vivent dans IndexedDB.
 - **Mises à jour** : chaque déploiement doit incrémenter `VERSION` dans `sw.js` ; les anciens caches sont supprimés à l'activation.
 
@@ -575,10 +576,10 @@ L'application peut aussi être déployée sur [Vercel](https://vercel.com), qui 
 ### `vercel.json` et la veille planifiée
 
 ```json
-{ "crons": [{ "path": "/api/cron", "schedule": "0 6 * * 1" }] }
+{ "crons": [{ "path": "/api/cron", "schedule": "0 6 * * *" }] }
 ```
 
-- Vercel appelle `GET /api/cron` chaque **lundi à 6 h UTC**, soit **8 h à Paris en heure d'été** (7 h en hiver) : les crons Vercel sont **toujours en UTC**.
+- Vercel appelle `GET /api/cron` chaque **jour à 6 h UTC**, soit **8 h à Paris en heure d'été** (7 h en hiver) : les crons Vercel sont **toujours en UTC**.
 - Sur l'offre gratuite (Hobby), l'appel peut avoir lieu **à n'importe quel moment dans l'heure** (entre 6 h 00 et 6 h 59 UTC).
 - La route est protégée : Vercel envoie `Authorization: Bearer <CRON_SECRET>` ; `server.js` compare cette valeur en temps constant et répond `401` si elle est absente ou fausse (ou si `CRON_SECRET` n'est pas configuré).
 - Aucune règle de redirection n'est nécessaire dans `vercel.json` : Vercel envoie automatiquement vers la fonction Express toute requête qui ne correspond pas à un fichier de `public/`.
@@ -661,7 +662,7 @@ Les deux scripts de nettoyage et de migration créent une sauvegarde `data.backu
 
 - **Traduction littérale** : le moteur gratuit traduit mot à mot ; le glossaire corrige les erreurs récurrentes mais pas tous les contresens. Une vraie reformulation nécessiterait un LLM (payant).
 - **Moteur de traduction non officiel** : il peut limiter le débit ou changer ; les articles concernés sont alors simplement reportés.
-- **Tailwind via CDN** : pratique mais déconseillé en production (poids, dépendance réseau) ; passer à Tailwind CLI serait plus propre.
+- **Tailwind compilé** : après toute modification de classes dans `public/*.html|js`, lancer `npm run build:css` et commiter `public/tailwind.css` (sinon les nouvelles classes n'auront aucun style en production).
 - **Infobulles natives** (`title`) : invisibles au clavier et au toucher.
 - **Vercel** : sans store Blob connecté, stockage éphémère (`/tmp`) ; avec Blob, les modifications mettent jusqu'à 15 s à apparaître sur les autres instances.
 - **Stockage JSON** : adapté à un usage personnel ; au-delà de quelques milliers de fiches ou avec plusieurs éditeurs, SQLite serait préférable.

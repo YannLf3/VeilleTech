@@ -10,7 +10,8 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-const readSeed = async (seedFile) => JSON.parse(await fs.readFile(seedFile, 'utf8'));
+/** Données de départ : chemin d'un fichier JSON, ou fonction renvoyant les données (ex. liste de sources calculée). */
+const readSeed = async (seed) => (typeof seed === 'function' ? seed() : JSON.parse(await fs.readFile(seed, 'utf8')));
 
 function conflict() {
   return Object.assign(new Error('Les données ont été modifiées par une autre instance.'), { code: 'CONFLICT' });

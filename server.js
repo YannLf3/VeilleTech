@@ -83,6 +83,21 @@ const SEED_FILE = path.join(__dirname, 'data.seed.json');
 const store = createStore({ dataFile: DATA_FILE, seedFile: SEED_FILE });
 let items = []; // dernière version connue (rafraîchie avant chaque lecture/écriture)
 
+// Sources de veille (flux RSS/Atom), modifiables depuis l'interface admin. Même pilote que les fiches (Blob privé
+// `techveille/sources.json` ou fichier `sources.json` à côté de data.json). Tant qu'aucune modification n'a été faite,
+// la liste de départ vient de FEED_URLS + GAMING_FEED_URLS ; ensuite le store fait foi (ces variables sont ignorées).
+const SOURCES_FILE = path.join(path.dirname(DATA_FILE), 'sources.json');
+const sourceId = (url) => crypto.createHash('sha1').update(url).digest('hex').slice(0, 12);
+const defaultSources = () => {
+  const seed = [
+    ...parseFeeds(FEED_URLS).map((url) => ({ url, category: null })),
+    ...parseFeeds(GAMING_FEED_URLS).map((url) => ({ url, category: 'Gaming' })),
+  ];
+  return [...new Map(seed.map((s) => [s.url, s])).values()].map((s) => ({ id: sourceId(s.url), enabled: true, ...s }));
+};
+const sourcesStore = createStore({ dataFile: SOURCES_FILE, seedFile: defaultSources, pathname: 'techveille/sources.json' });
+const MAX_SOURCES = 40;
+
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 
 /**
@@ -91,14 +106,14 @@ const httpError = (status, message) => Object.assign(new Error(message), { statu
  * (Vercel Blob), l'opération est rejouée sur les données à jour.
  */
 const MUTATE_ATTEMPTS = 6;
-async function mutate(fn) {
+async function mutate(fn, target = store) {
   for (let attempt = 1; ; attempt++) {
     // Copie de travail : un essai raté ne pollue pas la copie partagée du store.
-    const draft = structuredClone(await store.load(true));
+    const draft = structuredClone(await target.load(true));
     const result = fn(draft);
     try {
-      await store.save(draft);
-      items = draft;
+      await target.save(draft);
+      if (target === store) items = draft;
       return result;
     } catch (err) {
       if (err.code !== 'CONFLICT' || attempt >= MUTATE_ATTEMPTS) throw err;
@@ -123,6 +138,24 @@ const safeUrl = (u) => {
     return '';
   }
 };
+
+const parseFeeds = (list) => list.split(',').map((u) => safeUrl(u.trim())).filter(Boolean);
+
+/**
+ * Refuse les hôtes locaux/privés (localhost, 10.x, 192.168.x, 169.254.x…) : l'URL d'un flux ajoutée depuis l'admin est
+ * appelée par le serveur, il ne doit pas servir à sonder le réseau interne. (Ne couvre pas un DNS qui pointerait vers
+ * une IP privée : l'accès admin reste la vraie protection.)
+ */
+function isPrivateHost(hostname) {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || /\.(localhost|local|internal|lan)$/.test(h)) return true;
+  const v4 = h.match(/^(\d+)\.(\d+)\.\d+\.\d+$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  return h.includes(':') && (h === '::' || h === '::1' || /^(f[cd]|fe[89ab])/.test(h) || h.startsWith('::ffff:'));
+}
 
 /** Valide et normalise une fiche ; null si titre/résumé absents. */
 function sanitize(raw, id) {
@@ -152,21 +185,19 @@ const validId = (id) => (typeof id === 'string' && /^[\w-]{1,80}$/.test(id) ? id
 /* ------------------------------ Veille (RSS) ------------------------------- */
 
 const parser = new Parser({ timeout: 10_000 });
-const parseFeeds = (list) => list.split(',').map((u) => safeUrl(u.trim())).filter(Boolean);
-const GAMING_FEEDS = new Set(parseFeeds(GAMING_FEED_URLS));
-const FEEDS = [...new Set([...parseFeeds(FEED_URLS), ...GAMING_FEEDS])]; // Set : pas de flux en double
 let running = null;
 
 /**
- * Récupère les flux RSS/Atom (FEED_URLS), écarte les doublons (URL + titre) et le hors-périmètre,
+ * Récupère les flux RSS/Atom actifs du store des sources (modifiable depuis l'admin), écarte les doublons (URL + titre) et le hors-périmètre,
  * puis traduit/synthétise en français (veille.js). Un article dont la traduction échoue n'est pas
  * enregistré : son URL restant inconnue, il sera retenté au prochain passage.
  */
 async function fetchVeille() {
   const current = await store.load(true); // lecture initiale des articles existants
   const known = new Set(current.map((it) => it.url));
+  const sources = (await sourcesStore.load(true)).filter((s) => s.enabled);
   const results = await Promise.allSettled(
-    FEEDS.map(async (url) => ({ url, feed: await parser.parseURL(url) }))
+    sources.map(async (source) => ({ source, feed: await parser.parseURL(source.url) }))
   );
   const candidates = [];
   for (const r of results) {
@@ -174,13 +205,14 @@ async function fetchVeille() {
       console.warn('[veille] flux en échec :', r.reason?.message);
       continue;
     }
-    const isGaming = GAMING_FEEDS.has(r.value.url);
-    const limit = Number(isGaming ? GAMING_FEED_LIMIT : FEED_LIMIT);
-    for (const e of r.value.feed.items.slice(0, limit)) {
+    const { source, feed } = r.value;
+    // Source à catégorie imposée (ex. Gaming) : classée d'office, avec la limite par flux dédiée.
+    const limit = Number(source.category ? GAMING_FEED_LIMIT : FEED_LIMIT);
+    for (const e of feed.items.slice(0, limit)) {
       const url = safeUrl(e.link);
       if (!url || known.has(url)) continue;
       known.add(url);
-      const candidate = veille.fromFeedItem(e, r.value.url, isGaming ? 'Gaming' : null);
+      const candidate = veille.fromFeedItem(e, source.url, source.category ?? null);
       // Déjà hors rétention : l'ingérer serait inutile (il serait purgé aussitôt, puis retraduit à chaque passage).
       if (veille.isExpired(candidate.date, Number(RETENTION_DAYS))) continue;
       candidates.push({ ...candidate, url });
@@ -200,15 +232,17 @@ async function fetchVeille() {
     }
   }
   // Rétention : on retire les vieilles fiches « auto » non retravaillées (le fichier ne grossit pas indéfiniment).
-  const { kept, removed } = veille.purgeOld([...fresh, ...current], Number(RETENTION_DAYS));
+  const { items: tagged, changed: retagged } = veille.retagGames([...fresh, ...current]); // tags de jeux des anciennes fiches
+  const { kept, removed } = veille.purgeOld(tagged, Number(RETENTION_DAYS));
   // Sauvegarde directe, sans vérification de version (forceOverwrite) : pas d'erreur CONFLICT possible.
-  if (fresh.length || removed.length) {
+  if (fresh.length || removed.length || retagged) {
     await store.save(kept, { forceOverwrite: true });
     items = kept;
   }
   return {
     added: fresh.length,
     purged: removed.length,
+    retagged,
     rejected: candidates.length - fresh.length - untranslated,
     untranslated,
     failedFeeds: results.filter((r) => r.status === 'rejected').length,
@@ -333,6 +367,58 @@ app.get('/api/cron', async (req, res) => {
   const valid = Boolean(CRON_SECRET) && received.length === expected.length && crypto.timingSafeEqual(received, expected);
   if (!valid) return res.status(401).json({ error: 'Non autorisé.' });
   res.json(await runVeille());
+});
+
+/* ------------------------- Sources de veille (admin) ------------------------ */
+
+const publicSource = (s) => ({ ...s, host: new URL(s.url).hostname.replace(/^www\./, '') });
+const findSource = (list, id) => {
+  const i = list.findIndex((s) => s.id === id);
+  if (i === -1) throw httpError(404, 'Source introuvable.');
+  return i;
+};
+
+app.get('/api/admin/sources', requireAuth, async (req, res) => res.json((await sourcesStore.load(true)).map(publicSource)));
+
+/** Ajoute un flux : l'URL est d'abord TESTÉE (lecture réelle du flux) pour ne jamais enregistrer une source cassée. */
+app.post('/api/admin/sources', requireAuth, async (req, res) => {
+  const url = safeUrl(String(req.body?.url ?? '').trim());
+  if (!url) throw httpError(400, 'URL invalide : elle doit commencer par http:// ou https://.');
+  if (isPrivateHost(new URL(url).hostname)) throw httpError(400, 'Adresse locale ou privée refusée.');
+  const category = req.body?.category || null; // null = classement automatique par mots-clés
+  if (category !== null && !CATEGORIES.includes(category)) throw httpError(400, 'Catégorie inconnue.');
+
+  let feed;
+  try {
+    feed = await parser.parseURL(url);
+  } catch (err) {
+    throw httpError(422, `Flux illisible ou injoignable (${String(err.message).slice(0, 120)}).`);
+  }
+  if (!feed.items?.length) throw httpError(422, 'Ce flux ne contient aucun article.');
+
+  const entry = { id: sourceId(url), url, category, enabled: true };
+  await mutate((list) => {
+    if (list.some((s) => s.id === entry.id)) throw httpError(409, 'Ce flux est déjà dans la liste.');
+    if (list.length >= MAX_SOURCES) throw httpError(400, `Limite de ${MAX_SOURCES} sources atteinte.`);
+    list.push(entry);
+  }, sourcesStore);
+  res.status(201).json({ ...publicSource(entry), title: String(feed.title ?? '').slice(0, 120), itemCount: feed.items.length });
+});
+
+/** Active / met en pause une source (sans la supprimer). */
+app.patch('/api/admin/sources/:id', requireAuth, async (req, res) => {
+  if (typeof req.body?.enabled !== 'boolean') throw httpError(400, 'Champ « enabled » (booléen) requis.');
+  const source = await mutate((list) => {
+    const s = list[findSource(list, req.params.id)];
+    s.enabled = req.body.enabled;
+    return { ...s };
+  }, sourcesStore);
+  res.json(publicSource(source));
+});
+
+app.delete('/api/admin/sources/:id', requireAuth, async (req, res) => {
+  await mutate((list) => list.splice(findSource(list, req.params.id), 1), sourcesStore);
+  res.status(204).end();
 });
 
 /** Récapitulatif Markdown des fiches datées des 7 derniers jours, groupées par catégorie. */

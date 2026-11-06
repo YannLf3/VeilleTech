@@ -47,6 +47,14 @@ const CATEGORY_KEYWORDS = {
     'roblox', 'league of legends', 'apex legends', 'counter-strike', 'cs2', 'gta( ?(v|vi|6))?', 'playstation', 'ps[45]', 'xbox', 'nintendo',
     'switch 2', 'steam deck', 'zelda', 'pok[eé]mon', 'elden ring', 'game pass'],
 };
+// Jeux suivis par les puces de la catégorie Gaming (le front en a la liste dans GAME_CHIPS, public/app.js : garder synchronisé).
+// `tag` = tag posé sur la fiche à l'ingestion ; `keywords` = motifs cherchés dans le titre/tags source, puis dans le résumé.
+const GAMES = [
+  { tag: 'valorant', label: 'Valorant', keywords: ['valorant'] },
+  { tag: 'fortnite', label: 'Fortnite', keywords: ['fortnite'] },
+  { tag: 'minecraft', label: 'Minecraft', keywords: ['minecraft'] },
+  { tag: 'call-of-duty', label: 'Call of Duty', keywords: ['call of duty', 'warzone', 'black ops', 'modern warfare'] },
+];
 const KEYWORD_RES = Object.entries(CATEGORY_KEYWORDS).map(([cat, kws]) => [cat, kws.map((k) => new RegExp(`(^|[^a-z])(${k})([^a-z]|$)`))]);
 
 // Corrections des contresens fréquents de la traduction automatique (vocabulaire dev).
@@ -106,6 +114,32 @@ function categorize(title, tags, summary = '') {
   const best = (text) =>
     KEYWORD_RES.map(([cat, res]) => [cat, res.filter((re) => re.test(text)).length]).reduce((a, b) => (b[1] > a[1] ? b : a), [null, 0])[0];
   return best(norm(` ${title} ${tags.join(' ')} `)) ?? best(norm(summary));
+}
+
+const GAME_RES = GAMES.map((g) => [g.tag, g.keywords.map((k) => new RegExp(`(^|[^a-z])(${k})([^a-z]|$)`))]);
+
+/** Tags des jeux cités : d'abord dans le titre + tags, à défaut dans le résumé (évite les mentions en passant). */
+function detectGames(title, tags = [], summary = '') {
+  const found = (text) => GAME_RES.filter(([, res]) => res.some((re) => re.test(text))).map(([tag]) => tag);
+  const inTitle = found(norm(` ${title} ${tags.join(' ')} `));
+  return inTitle.length ? inTitle : found(norm(summary));
+}
+
+/**
+ * Rattrapage : pose les tags de jeux sur les fiches Gaming « auto » qui n'en ont aucun (ingérées avant cette fonction).
+ * Ne modifie pas le tableau reçu ; renvoie une nouvelle liste et le nombre de fiches changées.
+ */
+function retagGames(items) {
+  const gameTags = new Set(GAMES.map((g) => g.tag));
+  let changed = 0;
+  const out = items.map((it) => {
+    if (it.category !== 'Gaming' || !it.tags?.includes('auto') || it.tags.some((t) => gameTags.has(t))) return it;
+    const games = detectGames(it.title, it.tags, it.summary);
+    if (!games.length) return it;
+    changed++;
+    return { ...it, tags: [...new Set([...games, ...it.tags])].slice(0, 8) };
+  });
+  return { items: out, changed };
 }
 
 /** Rejette hors-périmètre ; pour les sources non officielles, aussi le promotionnel, le trop court ou sans vrai résumé. */
@@ -238,14 +272,16 @@ async function toFiche(raw) {
   const from = detectLang(`${title} ${summary}`);
   const [t, ...rest] = (await tr(`${title}\n${summary}`, from)).split('\n');
   if (!rest.length) throw new Error('Réponse de traduction inattendue');
+  const category = raw.forcedCategory ?? categorize(raw.title, tags, raw.summary) ?? 'Outils';
+  const games = category === 'Gaming' ? detectGames(raw.title, tags, raw.summary) : [];
   return {
     ...raw,
     title: shorten(t.trim().charAt(0).toUpperCase() + t.trim().slice(1), 120),
     summary: rest.join(' ').trim(),
     content: raw.content ? await translateLong(raw.content, from) : '',
-    category: raw.forcedCategory ?? categorize(raw.title, tags, raw.summary) ?? 'Outils',
+    category,
     status: 'experimental',
-    tags: ['auto', ...harmonizeTags(tags)],
+    tags: [...new Set(['auto', ...games, ...harmonizeTags(tags)])],
   };
 }
 
@@ -277,4 +313,4 @@ function isDuplicate(title, items) {
 /** Trie les sources anglaises en premier : meilleure traduction conservée en cas de doublon. */
 const bySourceLang = (a, b) => (detectLang(`${b.title} ${b.summary}`) === 'en') - (detectLang(`${a.title} ${a.summary}`) === 'en');
 
-module.exports = { CATEGORIES, fromFeedItem, isRelevant, toFiche, isDuplicate, purgeOld, isExpired, harmonizeTags, categorize, bySourceLang, detectLang, htmlToText };
+module.exports = { CATEGORIES, GAMES, detectGames, retagGames, fromFeedItem, isRelevant, toFiche, isDuplicate, purgeOld, isExpired, harmonizeTags, categorize, bySourceLang, detectLang, htmlToText };

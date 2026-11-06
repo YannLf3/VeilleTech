@@ -1,6 +1,6 @@
 # TechVeille Hub
 
-> **Veille technologique front-end, sans le bruit.**
+> **Veille tech & gaming, sans le bruit.**
 > Une Progressive Web App (PWA) qui agrège automatiquement les nouveautés du web (standards, CSS, design, outils, IA, écosystème), les traduit en français, les classe, et permet de les lire, filtrer, organiser et partager — y compris hors-ligne.
 
 ---
@@ -60,6 +60,8 @@ L'objectif n'était donc pas de livrer un produit commercial, mais d'**évaluer 
 | **Infobulles** | Les concepts techniques connus (View Transitions, hydratation, Core Web Vitals, LLM, MCP…) sont soulignés en pointillé dans les résumés, avec une définition au survol. |
 | **Vue Liste / Vue Kanban** | Bascule dans le header. La vue Kanban (« Radar Tech ») répartit les fiches en 3 colonnes : *À surveiller*, *À tester*, *Prêt pour Prod*. |
 | **Fiche détaillée** | Résumé, exemple de code avec bouton « Copier », lien vers la documentation officielle, aperçu Markdown. |
+| **Lu / non lu** | Badge « Nouveau » sur les fiches jamais ouvertes, bouton « Non lues (N) » (filtre + compteur) et « Tout marquer comme lu » dans le menu ⋯. L'état est propre à chaque navigateur (IndexedDB). |
+| **Puces par jeu** | Dans la catégorie Gaming : Valorant, Fortnite, Minecraft, Call of Duty (filtres rapides). |
 | **Mode lecture** | « Lire sur l'app » ouvre l'article complet (traduit) dans une vue épurée, sans quitter la PWA. |
 | **Export Markdown** | Copie ou téléchargement `.md` d'une fiche, ou de toute la sélection filtrée. |
 | **Favoris** | Étoile sur chaque fiche, conservés localement (IndexedDB), synchronisés entre onglets. |
@@ -73,6 +75,7 @@ L'objectif n'était donc pas de livrer un produit commercial, mais d'**évaluer 
 | **CRUD des fiches** | Ajouter, modifier, supprimer une fiche via un formulaire. |
 | **Kanban interactif** | Glisser-déposer une fiche d'une colonne à l'autre (ou flèches ← → au clavier/tactile) pour changer son statut. |
 | **Lancer la veille web** | Déclenche immédiatement la récupération des flux RSS (sinon automatique chaque jour à 8 h). |
+| **Gérer les sources de veille** | Menu ⋯ (admin) : ajouter un flux RSS/Atom (testé avant d'être enregistré, catégorie imposée facultative), le mettre en pause ou le supprimer — sans redéployer. |
 | **Digest hebdomadaire** | Génère un récapitulatif Markdown des fiches des 7 derniers jours, prêt à copier pour un partage rapide. |
 | **Import JSON** | Import en masse de fiches depuis un fichier JSON. |
 
@@ -184,7 +187,9 @@ Toutes les variables sont lues par `server.js` (via `dotenv`). Le fichier `.env`
 | `CRON_SCHEDULE` | non | `0 8 * * *` | Planification de la veille (syntaxe cron ; défaut : tous les jours à 8 h). |
 | `RETENTION_DAYS` | non | `90` | Les fiches issues de la veille (tag `auto`), jamais retravaillées (statut resté `experimental`), sont supprimées après N jours ; `0` désactive la purge. Les fiches manuelles ou déplacées dans le Kanban sont conservées. Les favoris (stockés dans le navigateur) d'une fiche purgée disparaissent de l'affichage. |
 | `CRON_TZ` | non | `Europe/Paris` | Fuseau horaire du cron. |
-| `FEED_URLS` | non | 15 flux (voir §10) | Liste des flux RSS/Atom, séparés par des virgules. |
+| `FEED_URLS` | non | 15 flux (voir §10) | Flux RSS/Atom de **départ**, séparés par des virgules. Ignoré dès que les sources ont été modifiées depuis l'interface admin. |
+| `GAMING_FEED_URLS` | non | 5 flux gaming | Flux de départ classés « Gaming » d'office (mêmes règles que `FEED_URLS`). |
+| `GAMING_FEED_LIMIT` | non | `3` | Articles lus par flux à catégorie imposée à chaque passage. |
 | `FEED_LIMIT` | non | `5` | Nombre d'articles lus par flux à chaque passage. |
 | `DATA_PATH` | non | `data/data.json` | Emplacement du fichier de données. |
 | `CORS_ORIGIN` | non | — | Origines autorisées si le front est servi depuis un autre domaine. |
@@ -411,6 +416,8 @@ Toutes les réponses sont en JSON. Les routes marquées **JWT** exigent l'en-tê
 | `POST` | `/api/import` | JWT | Import en masse (`{ items: [...] }` ou tableau). |
 | `POST` | `/api/force-fetch` | JWT | Lance la veille immédiatement → `{ added, rejected, untranslated, failedFeeds }`. |
 | `GET` | `/api/admin/digest` | JWT | Digest Markdown des 7 derniers jours → `{ markdown, count, from, to }`. |
+| `GET` / `POST` | `/api/admin/sources` | JWT | Liste des sources / ajout `{ url, category? }` : le flux est lu avant d'être enregistré (422 illisible ou vide, 409 doublon, 400 URL ou hôte privé). |
+| `PATCH` / `DELETE` | `/api/admin/sources/:id` | JWT | Pause ou reprise `{ enabled }` / suppression d'une source. |
 | `GET` | `/api/cron` | `CRON_SECRET` | Veille planifiée par Vercel Cron (en-tête `Authorization: Bearer <CRON_SECRET>`). |
 
 Exemple :
@@ -445,7 +452,9 @@ curl -X POST http://localhost:3000/api/force-fetch -H "Authorization: Bearer $TO
 - **Automatique** : `node-cron`, par défaut **chaque jour à 8 h** (heure de Paris) en local et sous Docker ; sur Vercel, Cron Job de `vercel.json` → `GET /api/cron` (voir §14).
 - **Manuel** : bouton « Lancer la veille web » (admin) → `POST /api/force-fetch`, avec indicateur de chargement.
 
-### Sources par défaut (`FEED_URLS`)
+### Sources de départ (`FEED_URLS` + `GAMING_FEED_URLS`)
+
+Ces listes **amorcent** le store des sources (Blob `techveille/sources.json`) ; une fois modifiées depuis l'interface admin (menu ⋯ → « Gérer les sources de veille »), le store fait foi et ces variables sont ignorées.
 
 | Type | Sources |
 |---|---|
@@ -597,7 +606,7 @@ L'application peut aussi être déployée sur [Vercel](https://vercel.com), qui 
    | `ADMIN_USERNAME` | votre identifiant d'administration (évitez un nom devinable) |
    | `ADMIN_PASSWORD_HASH` | hash bcrypt de `npm run hash-password`, collé **sans apostrophes** (l'interface Vercel prend la valeur telle quelle, contrairement au fichier `.env`) |
    | `CRON_SECRET` | chaîne aléatoire ≥ 16 caractères |
-   | `FEED_URLS`, `FEED_LIMIT` | facultatif |
+   | `FEED_URLS`, `GAMING_FEED_URLS`, `FEED_LIMIT` | facultatif (liste de départ ; ensuite, gérée depuis l'interface admin) |
 
 4. **Redéployer** (onglet **Deployments → ⋯ → Redeploy**) : les variables ne sont prises en compte qu'au déploiement suivant.
 5. **Transférer vos fiches existantes** *(facultatif)* : sans cette étape, le Blob démarre avec les 15 fiches de `data.seed.json`. Pour envoyer vos fiches locales (texte du mode lecture compris), copier le jeton depuis **Storage → votre store Blob → onglet `.env.local`**, puis, sur votre machine :
